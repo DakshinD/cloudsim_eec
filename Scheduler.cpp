@@ -6,9 +6,17 @@
 //
 
 #include "Scheduler.hpp"
+#include <map>
+
+using std::map;
 
 static bool migrating = false;
 static unsigned active_machines = 16;
+
+// Data structures for scheduling state
+map<TaskId_t, VMId_t> task_to_vm;
+map<VMId_t, MachineId_t> vm_to_machine; 
+
 
 void Scheduler::Init() {
     // Find the parameters of the clusters
@@ -21,6 +29,8 @@ void Scheduler::Init() {
     // 
     SimOutput("Scheduler::Init(): Total number of machines is " + to_string(Machine_GetTotal()), 3);
     SimOutput("Scheduler::Init(): Initializing scheduler", 1);
+
+    // TBD: update vm_to_machine state here?
     for(unsigned i = 0; i < active_machines; i++)
         vms.push_back(VM_Create(LINUX, X86));
     for(unsigned i = 0; i < active_machines; i++) {
@@ -71,6 +81,68 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
     else {
         VM_AddTask(vms[task_id % active_machines], task_id, priority);
     }// Skeleton code, you need to change it according to your algorithm
+
+    // GUIDELINES:
+    // We are currently trying to add a new task
+    /*
+    ADDING A TASK
+    ---------------
+    1. We add this task to an existing VM on a running machine
+        a. Our VM could either already have tasks on it (priority conflicts), 
+            or for some reason have no tasks (it should've been shutdown)
+        b. By adding this task, we could exceed memory limits and have to 
+            migrate this VM to a different machine (either a on one, or wake
+            a new machine)
+    2. We add this task by starting a new VM on a running machine
+        a. Make sure that # of VMs < # of Cores for optimal performance (priority)
+        b. Can we satisfy memory requirements
+        c. We should choose a machine that was already on, we don't want to 
+            start a new machine for a single VM
+                (i). If we do start a new machine for this VM, (priority reasons?)
+                    We want to load balance the tasks from other machines to this
+                    new machine depending on number of cores? (Trade offs)
+    3. We add this task by migrating a VM to an already running machine
+        a. Why would we do this? Load balancing, taking advantage of free cores,
+        memory requirements, maybe this VM is running SLA3 and we have a SLA0 task
+        but if we added this task memory would exceed, so using this VM on a different machine
+        is perfect for priority. But is this more optimal then just starting another VM?
+    4. We add this task by migrating a VM to a sleeping machine
+        a. Load balancing scenarios, we can take advantage of VMs with low priority to
+        migrate, but all other machines are already loaded
+    5. We add this task by starting a new VM on a sleeping machine
+        a. Worst case scenario, starting a machine with only one VM requires us
+            to now load balance all the other machines with this machine for 
+            optimal usage
+
+    ON TASK COMPLETION
+    ---------------
+    1. If it was the last task on the VM
+        a. If it was the last VM on the machine, shut it down?
+        b. Load balance between VMs on the same machine or different machines?
+            (i) If one VM has > 1 task and this VM is empty now, balance
+            (ii) Is it more energy efficient to have tasks on the other VM instead of 
+                keeping this one open if we meet SLA cutoffs?
+    2. If it wasn't last task on the VM
+        (a) Maybe we have space on this VM now to add SLA3, low priority tasks
+            to here and free up higher priority tasks to run by themselves
+    
+    BASIC POLICIES:
+    ---------------
+        1. Is it better to have # VMs == # Cores in all scenarios,
+            or is it better for energy if # VMs > # Cores with less machines
+            while still passing SLA?
+        2. When # VMs < # Cores, we should just add the VM to that machine,
+            unless there is a problem with priority, and we want to group
+            the high priority tasks on the same machine but sparsely
+        3. High priority tasks should be by themselves on the VM
+        4. We are fine with putting low priority tasks on the same VM,
+            could also save energy
+        5. We want to prevent # VMs > # Cores, when can we allow this?
+            For low priority tasks? Or will this save us energy instead
+            of running another server at risk of violating SLA?
+        6. When can we value energy over latency?
+
+    */
 }
 
 void Scheduler::PeriodicCheck(Time_t now) {
