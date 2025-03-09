@@ -7,15 +7,34 @@
 
 #include "Scheduler.hpp"
 #include <map>
+#include <set>
+#include <algorithm>
 
 using std::map;
+using std::set;
 
-static bool migrating = false;
-static unsigned active_machines = 16;
+vector<MachineId_t> on_machines;
+vector<MachineId_t> off_machines;
+unsigned total_machines = -1;
 
 // Data structures for scheduling state
 map<TaskId_t, VMId_t> task_to_vm;
 map<VMId_t, MachineId_t> vm_to_machine; 
+map<MachineId_t, set<VMId_t>> machine_to_vms;
+map<VMId_t, set<TaskId_t>> vm_to_tasks;
+
+
+// Add this new method after Init()
+void PrintMachineToVMs() {
+    SimOutput("Current machine_to_vms mapping:", 3);
+    for (const auto& [machine_id, vm_set] : machine_to_vms) {
+        string vm_list = "";
+        for (const auto& vm_id : vm_set) {
+            vm_list += to_string(vm_id) + " ";
+        }
+        SimOutput("Machine " + to_string(machine_id) + " has VMs: " + vm_list, 3);
+    }
+}
 
 
 void Scheduler::Init() {
@@ -30,120 +49,72 @@ void Scheduler::Init() {
     SimOutput("Scheduler::Init(): Total number of machines is " + to_string(Machine_GetTotal()), 3);
     SimOutput("Scheduler::Init(): Initializing scheduler", 1);
 
-    // TBD: update vm_to_machine state here?
-    for(unsigned i = 0; i < active_machines; i++)
-        vms.push_back(VM_Create(LINUX, X86));
-    for(unsigned i = 0; i < active_machines; i++) {
+    total_machines = Machine_GetTotal();
+    for(unsigned i = 0; i < total_machines; i++) {
         machines.push_back(MachineId_t(i));
+        off_machines.push_back(MachineId_t(i));
+        // Set the default state of all machines to active for greedy
+        Machine_SetState (MachineId_t(i), S0);
+        SimOutput("Scheduler::Init(): Created machine id of " + to_string(i), 4);
     }    
-    for(unsigned i = 0; i < active_machines; i++) {
-        VM_Attach(vms[i], machines[i]);
-    }
-
-    bool dynamic = false;
-    if(dynamic)
-        for(unsigned i = 0; i<4 ; i++)
-            for(unsigned j = 0; j < 8; j++)
-                Machine_SetCorePerformance(MachineId_t(0), j, P3);
-    // Turn off the ARM machines
-    for(unsigned i = 24; i < Machine_GetTotal(); i++)
-        Machine_SetState(MachineId_t(i), S5);
-
-    SimOutput("Scheduler::Init(): VM ids are " + to_string(vms[0]) + " ahd " + to_string(vms[1]), 3);
 }
 
 void Scheduler::MigrationComplete(Time_t time, VMId_t vm_id) {
     // Update your data structure. The VM now can receive new tasks
 }
 
+// vector<MachineId_t> getAllOnMachines(vector<MachineId_t)
+
+void AddTaskToMachine(MachineId_t machine_id, TaskId_t task_id) {
+    VMId_t vm_id = VM_Create(RequiredVMType(task_id), RequiredCPUType(task_id));
+    VM_Attach(vm_id, machine_id);
+    vm_to_machine[vm_id] = machine_id;
+    machine_to_vms[machine_id].insert(vm_id);
+
+    VM_AddTask(vm_id, task_id, LOW_PRIORITY);
+    task_to_vm[task_id] = vm_id;
+    vm_to_tasks[vm_id].insert(task_id);
+    return;
+}
+
 void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
     // Get the task parameters
-    //  IsGPUCapable(task_id);
-    //  GetMemory(task_id);
-    //  RequiredVMType(task_id);
-    //  RequiredSLA(task_id);
-    //  RequiredCPUType(task_id);
-    // Decide to attach the task to an existing VM, 
-    //      vm.AddTask(taskid, Priority_T priority); or
-    // Create a new VM, attach the VM to a machine
-    //      VM vm(type of the VM)
-    //      vm.Attach(machine_id);
-    //      vm.AddTask(taskid, Priority_t priority) or
-    // Turn on a machine, create a new VM, attach it to the VM, then add the task
-    //
-    // Turn on a machine, migrate an existing VM from a loaded machine....
-    //
-    // Other possibilities as desired
-    Priority_t priority = (task_id == 0 || task_id == 64)? HIGH_PRIORITY : MID_PRIORITY;
-    if(migrating) {
-        VM_AddTask(vms[0], task_id, priority);
+    TaskInfo_t task = GetTaskInfo (task_id);
+
+
+    for (MachineId_t on_machine_id : on_machines) {
+        if (RequiredCPUType(task_id) == Machine_GetCPUType(on_machine_id)) {
+            // We know this machine is compatible with the task
+            MachineInfo_t machine_info = Machine_GetInfo(on_machine_id);
+            unsigned memory_left = machine_info.memory_size - machine_info.memory_used;
+            if (memory_left >= GetTaskMemory(task_id)) {
+                // We have enough memory on this machine
+                // We need to create a new VM and put the task on it
+                AddTaskToMachine(on_machine_id, task_id);
+                PrintMachineToVMs();
+                return;
+            }
+        }
+    }   
+
+    // We know we couldn't add this task to any of the on machines
+    // Turn on a off machine
+    for (MachineId_t off_machine_id : off_machines) {
+        MachineInfo_t off_machine_info = Machine_GetInfo(off_machine_id);
+        if (RequiredCPUType(task_id) == Machine_GetCPUType(off_machine_id) && off_machine_info.memory_size >= GetTaskMemory(task_id)) {
+            // We have a compatible machine
+            Machine_SetState(off_machine_id, S0);
+            off_machines.erase(find(off_machines.begin(), off_machines.end(), off_machine_id));
+            on_machines.push_back(off_machine_id);
+            AddTaskToMachine(off_machine_id, task_id);
+            return;
+        }
     }
-    else {
-        VM_AddTask(vms[task_id % active_machines], task_id, priority);
-    }// Skeleton code, you need to change it according to your algorithm
 
-    // GUIDELINES:
-    // We are currently trying to add a new task
-    /*
-    ADDING A TASK
-    ---------------
-    1. We add this task to an existing VM on a running machine
-        a. Our VM could either already have tasks on it (priority conflicts), 
-            or for some reason have no tasks (it should've been shutdown)
-        b. By adding this task, we could exceed memory limits and have to 
-            migrate this VM to a different machine (either a on one, or wake
-            a new machine)
-    2. We add this task by starting a new VM on a running machine
-        a. Make sure that # of VMs < # of Cores for optimal performance (priority)
-        b. Can we satisfy memory requirements
-        c. We should choose a machine that was already on, we don't want to 
-            start a new machine for a single VM
-                (i). If we do start a new machine for this VM, (priority reasons?)
-                    We want to load balance the tasks from other machines to this
-                    new machine depending on number of cores? (Trade offs)
-    3. We add this task by migrating a VM to an already running machine
-        a. Why would we do this? Load balancing, taking advantage of free cores,
-        memory requirements, maybe this VM is running SLA3 and we have a SLA0 task
-        but if we added this task memory would exceed, so using this VM on a different machine
-        is perfect for priority. But is this more optimal then just starting another VM?
-    4. We add this task by migrating a VM to a sleeping machine
-        a. Load balancing scenarios, we can take advantage of VMs with low priority to
-        migrate, but all other machines are already loaded
-    5. We add this task by starting a new VM on a sleeping machine
-        a. Worst case scenario, starting a machine with only one VM requires us
-            to now load balance all the other machines with this machine for 
-            optimal usage
-
-    ON TASK COMPLETION
-    ---------------
-    1. If it was the last task on the VM
-        a. If it was the last VM on the machine, shut it down?
-        b. Load balance between VMs on the same machine or different machines?
-            (i) If one VM has > 1 task and this VM is empty now, balance
-            (ii) Is it more energy efficient to have tasks on the other VM instead of 
-                keeping this one open if we meet SLA cutoffs?
-    2. If it wasn't last task on the VM
-        (a) Maybe we have space on this VM now to add SLA3, low priority tasks
-            to here and free up higher priority tasks to run by themselves
-    
-    BASIC POLICIES:
-    ---------------
-        1. Is it better to have # VMs == # Cores in all scenarios,
-            or is it better for energy if # VMs > # Cores with less machines
-            while still passing SLA?
-        2. When # VMs < # Cores, we should just add the VM to that machine,
-            unless there is a problem with priority, and we want to group
-            the high priority tasks on the same machine but sparsely
-        3. High priority tasks should be by themselves on the VM
-        4. We are fine with putting low priority tasks on the same VM,
-            could also save energy
-        5. We want to prevent # VMs > # Cores, when can we allow this?
-            For low priority tasks? Or will this save us energy instead
-            of running another server at risk of violating SLA?
-        6. When can we value energy over latency?
-
-    */
+    // We just couldn't add this anywhere. GG
+    SimOutput("Scheduler::NewTask(): Couldn't add task " + to_string(task_id) + " anywhere", 0);
 }
+
 
 void Scheduler::PeriodicCheck(Time_t now) {
     // This method should be called from SchedulerCheck()
@@ -168,6 +139,61 @@ void Scheduler::TaskComplete(Time_t now, TaskId_t task_id) {
     // Do any bookkeeping necessary for the data structures
     // Decide if a machine is to be turned off, slowed down, or VMs to be migrated according to your policy
     // This is an opportunity to make any adjustments to optimize performance/energy
+    VMId_t vm_id = task_to_vm[task_id];
+    MachineId_t machine_id = vm_to_machine[vm_id];
+
+    vm_to_machine.erase(task_to_vm[task_id]);
+    machine_to_vms[machine_id].erase(vm_id);
+    VM_Shutdown(task_to_vm[task_id]);
+
+    task_to_vm.erase(task_id);
+    vm_to_tasks[vm_id].erase(task_id);
+
+    // Sort all machines in ascending order of memory used
+    sort(machines.begin(), machines.end(), [](MachineId_t a, MachineId_t b) {
+        return Machine_GetInfo(a).memory_used < Machine_GetInfo(b).memory_used;
+    });
+
+    // Iterate over all machines 
+    for (unsigned i = 0; i < on_machines.size(); i++) {
+        // Iterate over all tasks in that Machine
+        MachineInfo_t machine_info = Machine_GetInfo(on_machines[i]);
+        for (auto vm_id : machine_to_vms[on_machines[i]]) {
+            TaskId_t task_id = *vm_to_tasks[vm_id].begin();
+            TaskInfo_t task = GetTaskInfo(task_id);
+            
+            // For each task we want to see if we can migrate to a more loaded machine
+            for (unsigned j = i + 1; j < on_machines.size(); j++) {
+                MachineInfo_t target_machine_info = Machine_GetInfo(on_machines[j]);
+                unsigned memory_left = target_machine_info.memory_size - target_machine_info.memory_used;
+
+                // If we can migrate this to a more loaded machine, do it
+                if (RequiredCPUType(task_id) == Machine_GetCPUType(on_machines[j]) && memory_left >= GetTaskMemory(task_id)) {
+                    VM_Migrate(vm_id, on_machines[j]);
+
+                    // Update the data structures
+                    vm_to_machine[vm_id] = on_machines[j];
+                    machine_to_vms[on_machines[j]].insert(vm_id);
+                    machine_to_vms[on_machines[i]].erase(vm_id);
+                    
+                    
+                }
+            }
+        }
+
+        // If this machine is now empty, turn it off
+        machine_info = Machine_GetInfo(on_machines[i]);
+        if (machine_info.active_vms == 0) {
+            Machine_SetState(on_machines[i], S5);
+            SimOutput("Scheduler::TaskComplete(): Machine " + to_string(on_machines[i]) + " is now empty and is being turned off", 1);
+            off_machines.push_back(on_machines[i]);
+            on_machines.erase(on_machines.begin() + i);
+        }
+    }
+
+    PrintMachineToVMs();
+    
+
     SimOutput("Scheduler::TaskComplete(): Task " + to_string(task_id) + " is complete at " + to_string(now), 4);
 }
 
@@ -199,19 +225,13 @@ void MigrationDone(Time_t time, VMId_t vm_id) {
     // The function is called on to alert you that migration is complete
     SimOutput("MigrationDone(): Migration of VM " + to_string(vm_id) + " was completed at time " + to_string(time), 4);
     Scheduler.MigrationComplete(time, vm_id);
-    migrating = false;
 }
 
 void SchedulerCheck(Time_t time) {
     // This function is called periodically by the simulator, no specific event
     SimOutput("SchedulerCheck(): SchedulerCheck() called at " + to_string(time), 4);
     Scheduler.PeriodicCheck(time);
-    static unsigned counts = 0;
-    counts++;
-    if(counts == 10) {
-        migrating = true;
-        VM_Migrate(1, 9);
-    }
+
 }
 
 void SimulationComplete(Time_t time) {
@@ -234,4 +254,3 @@ void SLAWarning(Time_t time, TaskId_t task_id) {
 void StateChangeComplete(Time_t time, MachineId_t machine_id) {
     // Called in response to an earlier request to change the state of a machine
 }
-
