@@ -8,7 +8,7 @@ SLA2: 0%
 Total Energy 0.0591623KW-Hour
 Simulation run finished in 33.24 seconds
 
-HourPartial.md -
+HourPartial.md (2 tasks)-
 SLA0: 0%
 SLA1: 0%
 SLA2: 68.9076%
@@ -18,4 +18,19 @@ Simulation run finished in 6046.44 seconds
 Hour.md - 
 Doesn't finish
 
+Experimental w/ only NewTask
+------------------------------
+Input.md - 
+SLA Violation report
+SLA0: 100%
+SLA1: 0%
+SLA2: 0%
+Total Energy 0.0591623KW-Hour
+Simulation run finished in 33.24 seconds
 
+HourPartial.md (2 tasks)-
+SLA0: 0%
+SLA1: 0%
+SLA2: 98.8428%
+Total Energy 0.208848KW-Hour
+Simulation run finished in 3915 seconds

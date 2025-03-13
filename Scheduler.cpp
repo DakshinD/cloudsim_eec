@@ -15,7 +15,8 @@ using std::set;
 
 enum MachinePowerState {
     ON = 0,
-    TRANSITION = 1, 
+    TURNING_ON = 1, 
+    TURNING_OFF = 2,
     OFF = 2,
 };
 
@@ -107,73 +108,125 @@ void Scheduler::MigrationComplete(Time_t time, VMId_t vm_id) {
     }
 }
 
+const unsigned W_STATE = 10;
+const unsigned W_CORES = 8;
+const unsigned W_MEM = 5;
+const unsigned W_GPU = 2;
+/*
+    1. On/off state
+    2. Core?
+    3. Memory 
+    4. GPU
+    5. Priority/SLA??? TBD
+*/
+double ComputeMachineScore(MachineId_t machine_id, TaskId_t task_id) {
+    MachineInfo_t machine_info = Machine_GetInfo(machine_id);
+    MachineState machine_state = machine_states[machine_id];
+    TaskInfo_t task = GetTaskInfo(task_id);
+
+    // On/off state 
+    double state_score;
+    if (machine_state.state == ON) { // Change this to use S states for more specificity later
+        state_score = 1.0;
+    } else if (machine_state.state == TURNING_ON) {
+        state_score = 0.7;
+    } else if (machine_state.state == OFF) {
+        state_score = 0.3;
+    } else {
+        state_score = 0.0;
+    }
+
+    // CPU cores
+    double core_score;
+    if (machine_info.active_vms >= machine_info.num_cpus) {
+        core_score = 0.1;
+    } else {
+        // We weight already loaded machines higher? How is this different from greedy?
+        core_score = (double)machine_info.active_vms / machine_info.num_cpus;
+    }
+
+    // Memory 
+    double mem_score = 1.0 - (double)machine_info.memory_used / machine_info.memory_size;
+    if (mem_score < 0) mem_score = 0.0;
+
+    // GPU
+    double gpu_score = (machine_info.gpus && task.gpu_capable) ? 1.0 : 0.0;
+
+    // Calcualte final score with weights
+    double total_score = (W_STATE * state_score) + 
+                            (W_CORES * core_score) + 
+                            (W_MEM * mem_score) + 
+                            (W_GPU * gpu_score);
+    return total_score;
+}
+
+/*
+ We add this task by starting a new VM on a running machine
+       a. Make sure that # of VMs < # of Cores for optimal performance (priority)
+       b. Make sure to set priority based on SLA (future, balance high priority across machines?)
+       c. Can we satisfy memory requirements
+       d. We should choose a machine that was already on, we don't want to
+           start a new machine for a single VM
+               (i). If we do start a new machine for this VM, (priority reasons?)
+                   We want to load balance the tasks from other machines to this
+                   new machine depending on number of cores? (Trade offs)
+
+    Can we make an objective function to rank all the machines? Rank:
+    - Disqualified if CPU doesnt match
+    1. On/off state
+    2. Core?
+    3. Memory 
+    4. GPU
+    5. Priority/SLA??? TBD
+    
+*/
 void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
     SimOutput("NewTask(): New task at time: " + to_string(now), 1);
     // Get the task parameters
     TaskInfo_t task = GetTaskInfo (task_id);
 
-    // Try adding to an on machine
-    for (auto& [machine_id, m_state] : machine_states) {
-        // If this machine is on and is the right CPU type and has memory left
-        if (m_state.state == ON && RequiredCPUType(task_id) == Machine_GetCPUType(machine_id)) {
-            // Calculate the memory left
-            MachineInfo_t machine_info = Machine_GetInfo(machine_id);
-            unsigned memory_left = machine_info.memory_size - machine_info.memory_used;
-            if (memory_left >= GetTaskMemory(task_id)) {
-                // We have enough memory on this machine
-                // We need to create a new VM and put the task on it
-                Add_TaskToMachine(machine_id, task_id);
-                PrintMachineToVMs();
-                return;
-            }
-        }
-    }
-    // We know we couldn't add this task to any of the on machines
-    // Turn on a off machine
-    // WONT WORK - COMPLICATED!!! We haev to wait til the machine comes back online in order to add?
-    // So we have to use the state completed method at the bottom?
-    for (auto& [machine_id, m_state] : machine_states) {
-        MachineInfo_t off_machine_info = Machine_GetInfo(machine_id);
-        if (m_state.state == OFF &&
-            RequiredCPUType(task_id) == Machine_GetCPUType(machine_id) &&
-            off_machine_info.memory_size >= GetTaskMemory(task_id)) {
-            // We have a compatible machine
-            Machine_SetState(machine_id, S0);
-            machine_states[machine_id].state = TRANSITION;
-            pending_attachments[machine_id].push_back(task_id);
-            
-            SimOutput("NewTask(): Added PENDING " + to_string(task_id) + " to on machine " + to_string(machine_id), 1);
-            PrintMachineToVMs();
-            return;
+    // Keep track of best matched machine
+    MachineId_t best_machine_id = -1;
+    double best_score = -1.0;
+
+    // Iterate over all machines
+    for (const auto& [machine_id, m_state] : machine_states) {
+        // Don't acknowledge machines without CPU compatibility
+        if (RequiredCPUType(task_id) != Machine_GetCPUType(machine_id)) 
+            continue;
+
+        // Calc score
+        double score = ComputeMachineScore(machine_id, task_id);
+        if (score > best_score) {
+            best_machine_id = machine_id;
+            best_score = score;
         }
     }
 
-    // If we still couldn't find anything, lets just add it to the first CPU compatible machine
-    for (auto& [machine_id, m_state] : machine_states) {
-        // If this machine is on and is the right CPU type and has memory left
-        if (RequiredCPUType(task_id) == Machine_GetCPUType(machine_id)) {
-            if (m_state.state == OFF || m_state.state == TRANSITION) {
-                Machine_SetState(machine_id, S0);
-                machine_states[machine_id].state = TRANSITION;
-                pending_attachments[machine_id].push_back(task_id);
-                SimOutput("NewTask(): Added overutilized PENDING " + to_string(task_id) + " to on machine " + to_string(machine_id), 1);
-                PrintMachineToVMs();
-                return;
-            } else if (m_state.state == ON) {
-                // We need to create a new VM and put the task on it
-                Add_TaskToMachine(machine_id, task_id);
-                SimOutput("NewTask(): Added overutilized " + to_string(task_id) + " to on machine " + to_string(machine_id), 1);
-                PrintMachineToVMs();
-                return;
-            }
-            SimOutput("the state of machine is " + to_string(m_state.state), 1);
-        }
+    if (best_machine_id == -1) {
+        ThrowException("Scheduler::NewTask(): Couldn't find a machine for task " + to_string(task_id));
+    }
+
+    // We have a machine, lets check its state
+    MachineState target = machine_states[best_machine_id];
+    if (target.state == ON) {
+        Add_TaskToMachine(best_machine_id, task_id);
     } 
-
-    // We just couldn't add this anywhere. TBD: We need to just add this on top of some machine and let it overutilize memory.
-    // We could also have to add it on top of a machine in transition, add as pending task
-    ThrowException("Scheduler::NewTask(): Couldn't add task " + to_string(task_id) + " anywhere with " + to_string(total_on_machines) + " machines");
-    // SimOutput("Scheduler::NewTask(): Couldn't add task " + to_string(task_id) + " anywhere", 1);
+    else if (target.state == OFF || target.state == TURNING_ON) {
+        if (target.state == OFF) {
+            Machine_SetState(best_machine_id, S0);
+            machine_states[best_machine_id].state = TURNING_ON;
+        }
+        pending_attachments[best_machine_id].push_back(task_id);
+        SimOutput("NewTask(): Added PENDING " + to_string(task_id) + " to off machine " + to_string(best_machine_id), 1); 
+    } else {
+        // state == TURNING_OFF
+        // Question: What happens if we setstate to S0 while it is turning off?
+        pending_attachments[best_machine_id].push_back(task_id);
+        SimOutput("NewTask(): Added PENDING " + to_string(task_id) + " to turning off machine " + to_string(best_machine_id), 1); 
+    }
+    PrintMachineToVMs();
+    return;
 }
 
 void DisplayProgressBar() {
@@ -285,7 +338,7 @@ void Scheduler::TaskComplete(Time_t now, TaskId_t task_id) {
         if (m_info.active_vms == 0 && total_on_machines > 1 && !Machine_IsMigrationTarget(m_id)) {
             Machine_SetState(m_id, S5);
             SimOutput("Scheduler::TaskComplete(): Machine " + to_string(m_id) + " is now empty and is being turned off", 1);
-            machine_states[m_id].state = TRANSITION;
+            machine_states[m_id].state = TURNING_OFF;
             total_on_machines--;
         }
 
@@ -409,7 +462,7 @@ void SLAWarning(Time_t time, TaskId_t task_id) {
                 off_machine_info.memory_size >= GetTaskMemory(task_id)) {
                 // We have a compatible machine
                 Machine_SetState(machine_id, S0);
-                machine_states[machine_id].state = TRANSITION;
+                machine_states[machine_id].state = TURNING_ON;
                 VM_Migrate(vm_id, machine_id); // TBD::: Move this to state change???? PENDING?
 
                 // Update the data structures
@@ -450,7 +503,7 @@ void StateChangeComplete(Time_t time, MachineId_t machine_id) {
         // Had to allow adding pending tasks to transitiong machines so it could work. Probably not OK.
         if (pending_attachments[machine_id].size() > 0) {
             Machine_SetState(machine_id, S0);
-            machine_states[machine_id].state = TRANSITION;
+            machine_states[machine_id].state = TURNING_ON;
         }
     }
 }
