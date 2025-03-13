@@ -93,17 +93,3 @@ task class:
         Seed: 520239
 }
 
-task class:
-{
-        Start time: 5000000
-        End time :  7000000
-        Inter arrival: 6000
-        Expected runtime: 6000000
-        Memory: 8
-        VM type: LINUX
-        GPU enabled: no
-        SLA type: SLA0
-        CPU type: X86
-        Task type: WEB
-        Seed: 520120
-}

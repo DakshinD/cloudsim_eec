@@ -19,41 +19,31 @@ enum MachinePowerState {
     OFF = 2,
 };
 
-struct VMState {
-    MachineId_t machine_id;
-    set<TaskId_t> tasks;
-};
-
-struct MachineState {
+struct MachineState { 
     set<VMId_t> vms;
-    unsigned memory_used;
+    unsigned memory_used; // not used currently
     MachinePowerState state;
 };
+// Progress Bar?? Only seen if -v 0
+unsigned total_tasks = 0;
+unsigned completed_tasks = 0;
 
 // Data Structures for state tracking
 unsigned total_machines = -1;
 unsigned total_on_machines = -1;
 map<TaskId_t, VMId_t> task_assignments;
-map<VMId_t, VMState> vm_states;
+vector<VMId_t> vms;
 map<MachineId_t, MachineState> machine_states;
-map<MachineId_t, vector<TaskId_t>> pending_attachments;
+map<MachineId_t, vector<TaskId_t>> pending_attachments; // We want to add VMs to a machine that is transitioning to ON but isnt ON yet.
 map<VMId_t, MachineId_t> ongoing_migrations;
-void Add_TaskToVM(VMId_t vm_id, TaskId_t task_id) {
-    task_assignments[task_id] = vm_id;
-    vm_states[vm_id].tasks.insert(task_id);
-}
 
-void Add_VMToMachine(MachineId_t machine_id, VMId_t vm_id) {
-    vm_states[vm_id].machine_id = machine_id;
-    machine_states[machine_id].vms.insert(vm_id);
-}
 
 void Add_TaskToMachine(MachineId_t machine_id, TaskId_t task_id) {
     VMId_t vm_id = VM_Create(RequiredVMType(task_id), RequiredCPUType(task_id));
     VM_Attach(vm_id, machine_id);
-    Add_VMToMachine(machine_id, vm_id);
+    machine_states[machine_id].vms.insert(vm_id);
     VM_AddTask(vm_id, task_id, LOW_PRIORITY);
-    Add_TaskToVM(vm_id, task_id);
+    task_assignments[task_id] = vm_id;
     SimOutput("NewTask(): Added " + to_string(task_id) + " on vm: " + to_string(vm_id) + " to on machine " + to_string(machine_id), 1);
     return;
 }
@@ -84,19 +74,12 @@ bool Machine_IsMigrationTarget(MachineId_t machine_id) {
 
 
 void Scheduler::Init() {
-    // Find the parameters of the clusters
-    // Get the total number of machines
-    // For each machine:
-    //      Get the type of the machine
-    //      Get the memory of the machine
-    //      Get the number of CPUs
-    //      Get if there is a GPU or not
-    // 
     SimOutput("Scheduler::Init(): Total number of machines is " + to_string(Machine_GetTotal()), 3);
     SimOutput("Scheduler::Init(): Initializing scheduler", 1);
 
     total_machines = Machine_GetTotal();
     total_on_machines = total_machines;
+    total_tasks = GetNumTasks();
     for(unsigned i = 0; i < total_machines; i++) {
         machines.push_back(MachineId_t(i));
         machine_states[i] = {{}, 0, ON};
@@ -107,12 +90,10 @@ void Scheduler::Init() {
 }
 
 void Scheduler::MigrationComplete(Time_t time, VMId_t vm_id) {
-    // vm_states[vm_id].machine_id = target_id;
-    // machine_states[m_id].vms.erase(vm_id);
     // Update your data structure. The VM now can receive new tasks
     SimOutput("MigrationComplete(): Migration of VM " + to_string(vm_id) + " completed at time " + to_string(time), 1);
-    vm_states[vm_id].machine_id = ongoing_migrations[vm_id];
-    machine_states[vm_states[vm_id].machine_id].vms.insert(vm_id);
+    VMInfo_t vm_info = VM_GetInfo(vm_id);
+    machine_states[vm_info.machine_id].vms.insert(vm_id);
     ongoing_migrations.erase(vm_id);
 
     // If there are no tasks on this VM, we can shut it down
@@ -121,9 +102,8 @@ void Scheduler::MigrationComplete(Time_t time, VMId_t vm_id) {
         SimOutput("MigrationComplete(): VM " + to_string(vm_id) + " is now empty and is being shut down", 1);
         VM_Shutdown(vm_id);
         // Remove the VM from the machine
-        MachineId_t m_id = vm_states[vm_id].machine_id;
+        MachineId_t m_id = vm_info.machine_id;
         machine_states[m_id].vms.erase(vm_id);
-        vm_states.erase(vm_id);
     }
 }
 
@@ -196,12 +176,27 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
     // SimOutput("Scheduler::NewTask(): Couldn't add task " + to_string(task_id) + " anywhere", 1);
 }
 
+void DisplayProgressBar() {
+    int barWidth = 70;
+    float progress = (float)completed_tasks / total_tasks;
+    // std::cout << "\033[2J\033[1;1H"; // Clear the console]]"
+    std::cout << "[";
+    int pos = barWidth * progress;
+    for (int i = 0; i < barWidth; ++i) {
+        if (i < pos) std::cout << "=";
+        else if (i == pos) std::cout << ">";
+        else std::cout << " ";
+    }
+    std::cout << "] " << int(progress * 100.0) << " %\r";
+    std::cout.flush();
+}
 
 void Scheduler::PeriodicCheck(Time_t now) {
     // This method should be called from SchedulerCheck()
     // SchedulerCheck is called periodically by the simulator to allow you to monitor, make decisions, adjustments, etc.
     // Unlike the other invocations of the scheduler, this one doesn't report any specific event
     // Recommendation: Take advantage of this function to do some monitoring and adjustments as necessary
+    DisplayProgressBar();
 }
 
 void Scheduler::Shutdown(Time_t time) {
@@ -209,37 +204,39 @@ void Scheduler::Shutdown(Time_t time) {
     // Report about the total energy consumed
     // Report about the SLA compliance
     // Shutdown everything to be tidy :-)
-    for (auto& [vm_id, vm_state] : vm_states) {
-        // VM_Shutdown(vm_id);
-    } 
+    for (auto id : vms) {
+        VM_Shutdown(id);
+    }
     SimOutput("SimulationComplete(): Finished!", 4);
     SimOutput("SimulationComplete(): Time is " + to_string(time), 4);
 }
 
 void Scheduler::TaskComplete(Time_t now, TaskId_t task_id) {
-    VMId_t vm_id = task_assignments[task_id];
-    SimOutput("Scheduler::TaskComplete(): Task " + to_string(task_id) + " is complete at " + to_string(now) + " on vm " + to_string(vm_id), 1);
     // Do any bookkeeping necessary for the data structures
     // Decide if a machine is to be turned off, slowed down, or VMs to be migrated according to your policy
-    // This is an opportunity to make any adjustments to optimize performance/energy
+    // This is an opportunity to make any adjustments to optimize performance/energy 
 
-    
+    VMId_t vm_id = task_assignments[task_id];
+    VMInfo_t vm_info = VM_GetInfo(vm_id);
+    SimOutput("Scheduler::TaskComplete(): Task " + to_string(task_id) + " is complete at " + to_string(now) + " on vm " + to_string(vm_id), 1);
+ 
     if (VM_GetInfo(vm_id).active_tasks.size() != 0) {
         ThrowException("Somehow there are active tasks on a VM?????");
     }
 
+    // PROGRESS
+    completed_tasks++;
+
     // First, delete the task
     task_assignments.erase(task_id);
-    vm_states[vm_id].tasks.erase(task_id);
     // Delete the VM - only do this because there was only one task
-    MachineId_t orig_m_id = vm_states[vm_id].machine_id;
+    MachineId_t orig_m_id = vm_info.machine_id;
     machine_states[orig_m_id].vms.erase(vm_id);
-    vm_states.erase(vm_id);
     SimOutput("Shutdown(): vm " + to_string(vm_id), 1);
+
     // The problem is trying to shut down a VM that is going through migration
     if (!ongoing_migrations.count(vm_id))
         VM_Shutdown(vm_id);
-    
 
     // Sort all machines in ascending order of memory used
     vector<pair<MachineId_t, MachineState>> sorted_machines;
@@ -258,7 +255,7 @@ void Scheduler::TaskComplete(Time_t now, TaskId_t task_id) {
         MachineState m_state = sorted_machines[i].second;
         // Iterate over all tasks - we can do this b/c only 1 task per VM
         for (auto poss_vm_id : m_state.vms) {
-            TaskId_t task_id = *vm_states[poss_vm_id].tasks.begin();
+            TaskId_t task_id = VM_GetInfo(poss_vm_id).active_tasks[0];
             TaskInfo_t task = GetTaskInfo(task_id);
 
             // For each task, try and find a more loaded machine to migrate to
@@ -273,7 +270,6 @@ void Scheduler::TaskComplete(Time_t now, TaskId_t task_id) {
                     VM_Migrate(poss_vm_id, target_id);
 
                     // Update the data structures
-                    // vm_states[vm_id].machine_id = target_id;
                     machine_states[m_id].vms.erase(poss_vm_id);
                     ongoing_migrations[poss_vm_id] = target_id;
                     // We can add the vm to the machines state of target in MigrationCompleted
@@ -284,11 +280,7 @@ void Scheduler::TaskComplete(Time_t now, TaskId_t task_id) {
 
         // If this machine is now empty, turn it off
         MachineInfo_t m_info = Machine_GetInfo(m_id);
-        //Can be off due to migration
-        // if (m_info.active_vms != machine_states[m_id].vms.size()) {
-        //     PrintMachineToVMs();
-        //     ThrowException("Machine state is not equal to machine.active_vms!! " + to_string(machine_states[m_id].vms.size()) + " vs " + to_string(m_info.active_vms));
-        // }
+
         // Don't sleep the machine if we are migrating a VM to it currently
         if (m_info.active_vms == 0 && total_on_machines > 1 && !Machine_IsMigrationTarget(m_id)) {
             Machine_SetState(m_id, S5);
@@ -363,6 +355,7 @@ void SLAWarning(Time_t time, TaskId_t task_id) {
     if (task.completion <= time && task.remaining_instructions == 0) {
         return;
     }
+    // IGNORE ALL CODE BELOW THIS ITS WRONGGGGGGG
     /* HERE WE ACTUALLY HAVE TO LOAD BALANCE EVERYTHING ELSE SINCE TASK_ID IS DONE */
     // Sort all machines in ascending order of memory used
     vector<pair<MachineId_t, MachineState>> sorted_machines;
@@ -380,7 +373,8 @@ void SLAWarning(Time_t time, TaskId_t task_id) {
     });
 
     VMId_t vm_id = task_assignments[task_id];
-    MachineId_t m_id = vm_states[vm_id].machine_id;
+    VMInfo_t vm_info = VM_GetInfo(vm_id);
+    MachineId_t m_id = vm_info.machine_id;
     MachineState m_state = machine_states[m_id];
     // We have our task
     
@@ -435,9 +429,11 @@ void StateChangeComplete(Time_t time, MachineId_t machine_id) {
     // Called in response to an earlier request to change the state of a machine
     SimOutput("StateChangeComplete(): Machine " + to_string(machine_id) + " has completed state change to " + to_string(Machine_GetInfo(machine_id).s_state) + " at time " + to_string(time), 1);
     MachineInfo_t m_info = Machine_GetInfo(machine_id);
+    // If machine turned on
     if (m_info.s_state == S0) {
         machine_states[machine_id].state = ON;
         total_on_machines++;
+        // Add all pending tasks for it
         if (pending_attachments[machine_id].size() > 0) {
             // We have pending attachments
             for (auto& task_id : pending_attachments[machine_id]) {
@@ -448,7 +444,10 @@ void StateChangeComplete(Time_t time, MachineId_t machine_id) {
         }
         PrintMachineToVMs();
     } else if (m_info.s_state == S5) {
+        // If we turned it off
         machine_states[machine_id].state = OFF; 
+        // But we added pending tasks while turning it off, then we need to turn it back on OOPS! Really slow
+        // Had to allow adding pending tasks to transitiong machines so it could work. Probably not OK.
         if (pending_attachments[machine_id].size() > 0) {
             Machine_SetState(machine_id, S0);
             machine_states[machine_id].state = TRANSITION;
