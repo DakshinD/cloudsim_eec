@@ -1,0 +1,21 @@
+Greedy algo v1 - no SLA handling
+--------------------------------
+Input.md - 
+SLA Violation report
+SLA0: 100%
+SLA1: 0%
+SLA2: 0%
+Total Energy 0.0591623KW-Hour
+Simulation run finished in 33.24 seconds
+
+HourPartial.md -
+SLA0: 0%
+SLA1: 0%
+SLA2: 68.9076%
+Total Energy 0.672032KW-Hour
+Simulation run finished in 6046.44 seconds
+
+Hour.md - 
+Doesn't finish
+
+
