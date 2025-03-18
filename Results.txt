@@ -34,3 +34,19 @@ SLA1: 0%
 SLA2: 98.8428%
 Total Energy 0.208848KW-Hour
 Simulation run finished in 3915 seconds
+
+HourPartial.md (3 tasks)-
+SLA violation report
+SLA0: 100%
+SLA1: 0%
+SLA2: 99.0994%
+Total Energy 0.234613KW-Hour
+Simulation run finished in 3915 seconds
+
+HourPartial.md (4 tasks)-
+SLA violation report
+SLA0: 100%
+SLA1: 0%
+SLA2: 99.5362%
+Total Energy 0.250756KW-Hour
+Simulation run finished in 3915 seconds

@@ -5,6 +5,15 @@
 //  Created by ELMOOTAZBELLAH ELNOZAHY on 10/20/24.
 //
 
+/*
+    TO-DO: going all the way to S2 is too slow for Hour.md, we need something in the middle or things in standby
+    - Try and implement adding multiple tasks to VM
+    - implement SLA checking in PeriodicCheck
+    - try and do load balacning in MemoryWarning
+    Do these 3 incrementally with Hour.md and try and get SLA working, then worry abt energy efficiency
+
+*/
+
 #include "Scheduler.hpp"
 #include <map>
 #include <set>
@@ -38,33 +47,113 @@ map<MachineId_t, MachineState> machine_states;
 map<MachineId_t, vector<TaskId_t>> pending_attachments; // We want to add VMs to a machine that is transitioning to ON but isnt ON yet.
 map<VMId_t, MachineId_t> ongoing_migrations;
 
+// Reporting Data Structures
+int total_sla[NUM_SLAS] = {0};
+int sla_violations[NUM_SLAS] = {0};
 
+
+/*
+    We need to choose a VM based on priority, but also CPU type and GPU, have a VM have same CPU/GPU type 
+*/
 void Add_TaskToMachine(MachineId_t machine_id, TaskId_t task_id) {
-    VMId_t vm_id = VM_Create(RequiredVMType(task_id), RequiredCPUType(task_id));
-    VM_Attach(vm_id, machine_id);
-    machine_states[machine_id].vms.insert(vm_id);
-    VM_AddTask(vm_id, task_id, LOW_PRIORITY);
+    // Choose whether to create VM or add to existing
+    VMId_t vm_id;
+    bool created_new_vm = false;
+    TaskInfo_t task_info = GetTaskInfo(task_id);
+    Priority_t task_priority = task_info.priority;
+
+    /* 
+        1. Create a new VM when
+            a. # of VMs < # of CPUs
+            b. Load balancing 
+        2. Add to existing VM
+            a. # of VMs >= # of CPUs
+    */
+
+    // If # of VMs < # of CPUs, create a new VM
+    if (machine_states[machine_id].vms.size() < Machine_GetInfo(machine_id).num_cpus) {
+        vm_id = VM_Create(RequiredVMType(task_id), RequiredCPUType(task_id));
+        created_new_vm = true;
+    } else {
+        // Find an existing VM to add the task to
+        VMId_t best_vm_id = -1;
+        double best_score = __DBL_MAX__;
+        for (const auto& vm : machine_states[machine_id].vms) {
+            VMInfo_t vm_info = VM_GetInfo(vm);
+            double score = 0.0;
+            switch (task_priority) {
+                case HIGH_PRIORITY:
+                    // For high priority, find VM with least high priority tasks
+                    score = std::count_if(vm_info.active_tasks.begin(), vm_info.active_tasks.end(), [](TaskId_t t) {
+                        return GetTaskInfo(t).priority == HIGH_PRIORITY ;
+                    });
+                    break;
+                case MID_PRIORITY:
+                    // For medium priority, find VM with least amount of high + medium priority tasks
+                    score = std::count_if(vm_info.active_tasks.begin(), vm_info.active_tasks.end(), [](TaskId_t t) {
+                        Priority_t p = GetTaskInfo(t).priority;
+                        return p == HIGH_PRIORITY || p == MID_PRIORITY;
+                    });
+                    break;
+                case LOW_PRIORITY:
+                    // For low priority, find VM with least total tasks
+                    score = vm_info.active_tasks.size();
+                    break;
+            }
+            // Update our best vm
+            if (score < best_score) {
+                best_score = score;
+                best_vm_id = vm;
+            }
+        }
+        if (best_vm_id != -1) {
+            vm_id = best_vm_id;
+        } else {
+            // If no suitable VM found, create a new one
+            vm_id = VM_Create(RequiredVMType(task_id), RequiredCPUType(task_id));
+            created_new_vm = true;
+        }
+    }
+    if (created_new_vm) {
+        VM_Attach(vm_id, machine_id);
+        machine_states[machine_id].vms.insert(vm_id);
+    }
+    VM_AddTask(vm_id, task_id, Priority_t(GetTaskPriority(task_id)));
     task_assignments[task_id] = vm_id;
     SimOutput("NewTask(): Added " + to_string(task_id) + " on vm: " + to_string(vm_id) + " to on machine " + to_string(machine_id), 1);
     return;
 }
 
-
-// Add this new method after Init()
 void PrintMachineToVMs() {
-    // SimOutput("Current machine_to_vms mapping:", 1);
-    string res = "TOTAL: \n";
+    string res = "DETAILED MACHINE TO VMs BREAKDOWN:\n";
     for (const auto& [machine_id, m_state] : machine_states) {
-        string vm_list = "";
+        MachineInfo_t machine_info = Machine_GetInfo(machine_id);
+        if (machine_info.active_tasks == 0) continue;
+        res += "\033[1;35mMachine " + to_string(machine_id) + " (" + to_string(m_state.vms.size()) + " VMs / " + to_string(machine_info.num_cpus) + " CPUs):\033[0m\n";
         for (const auto& vm_id : m_state.vms) {
-            vm_list += to_string(vm_id) + " (" + to_string(VM_GetInfo(vm_id).active_tasks.size()) + ") ";
+            VMInfo_t vm_info = VM_GetInfo(vm_id);
+            int high_priority_count = 0;
+            int mid_priority_count = 0;
+            int low_priority_count = 0;
+
+            for (const auto& task_id : vm_info.active_tasks) {
+                Priority_t priority = GetTaskInfo(task_id).priority;
+                if (priority == HIGH_PRIORITY) {
+                    high_priority_count++;
+                } else if (priority == MID_PRIORITY) {
+                    mid_priority_count++;
+                } else if (priority == LOW_PRIORITY) {
+                    low_priority_count++;
+                }
+            }
+
+            res += "  VM " + to_string(vm_id) + ": [\033[1;31m" + to_string(high_priority_count) + "\033[0m, \033[1;33m" + to_string(mid_priority_count) + "\033[0m, \033[1;32m" + to_string(low_priority_count) + "\033[0m]\n";
         }
-        if (Machine_GetInfo(machine_id).active_vms > 0)
-            res += "Machine " + to_string(machine_id) + " ours: " + to_string(m_state.vms.size()) + " vs sim: " + to_string(Machine_GetInfo(machine_id).active_vms) + " has VMs: " + vm_list + "\n";
     }
     SimOutput(res, 1);
 }
 
+    
 bool Machine_IsMigrationTarget(MachineId_t machine_id) {
     // Check if this machine is a target for migration
     for (const auto& [vm_id, m_id] : ongoing_migrations) {
@@ -108,18 +197,22 @@ void Scheduler::MigrationComplete(Time_t time, VMId_t vm_id) {
     }
 }
 
-const unsigned W_STATE = 10;
-const unsigned W_CORES = 8;
-const unsigned W_MEM = 5;
-const unsigned W_GPU = 2;
+
 /*
     1. On/off state
     2. Core?
     3. Memory 
     4. GPU
-    5. Priority/SLA??? TBD
+    5. # of pending if OFF
+    6. Priority/SLA??? TBD
 */
-double ComputeMachineScore(MachineId_t machine_id, TaskId_t task_id) {
+double ComputeMachineScoreForAdd(MachineId_t machine_id, TaskId_t task_id) {
+    const unsigned W_STATE = 7;
+    const unsigned W_CORES = 8;
+    const unsigned W_MEM = 8;
+    const unsigned W_GPU = 2;
+    const unsigned W_PENDING = 4;
+
     MachineInfo_t machine_info = Machine_GetInfo(machine_id);
     MachineState machine_state = machine_states[machine_id];
     TaskInfo_t task = GetTaskInfo(task_id);
@@ -131,15 +224,15 @@ double ComputeMachineScore(MachineId_t machine_id, TaskId_t task_id) {
     } else if (machine_state.state == TURNING_ON) {
         state_score = 0.7;
     } else if (machine_state.state == OFF) {
-        state_score = 0.3;
+        state_score = 0.5;
     } else {
-        state_score = 0.0;
+        state_score = 0.2;
     }
 
     // CPU cores
     double core_score;
     if (machine_info.active_vms >= machine_info.num_cpus) {
-        core_score = 0.1;
+        core_score = 0.0;
     } else {
         // We weight already loaded machines higher? How is this different from greedy?
         core_score = (double)machine_info.active_vms / machine_info.num_cpus;
@@ -156,10 +249,33 @@ double ComputeMachineScore(MachineId_t machine_id, TaskId_t task_id) {
     double total_score = (W_STATE * state_score) + 
                             (W_CORES * core_score) + 
                             (W_MEM * mem_score) + 
-                            (W_GPU * gpu_score);
+                            (W_GPU * gpu_score) -
+                            (W_PENDING * (double)pending_attachments[machine_id].size());
     return total_score;
 }
 
+/*
+    Can we turn this for a VM, its not like we are only migrating 1 task? 
+    So 
+*/
+MachineId_t GetBestScoreMachine(TaskId_t task_id) {
+    // Iterate over all machines
+    double best_score = -__DBL_MAX__;
+    MachineId_t best_machine_id = -1;
+    for (const auto& [machine_id, m_state] : machine_states) {
+        // Don't acknowledge machines without CPU compatibility
+        if (RequiredCPUType(task_id) != Machine_GetCPUType(machine_id)) 
+            continue;
+        // Calc score
+        double score = ComputeMachineScoreForAdd(machine_id, task_id);
+        // cout << "score: " << score << endl;
+        if (score > best_score) {
+            best_machine_id = machine_id;
+            best_score = score;
+        }
+    }
+    return best_machine_id;
+}
 /*
  We add this task by starting a new VM on a running machine
        a. Make sure that # of VMs < # of Cores for optimal performance (priority)
@@ -186,22 +302,7 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
     TaskInfo_t task = GetTaskInfo (task_id);
 
     // Keep track of best matched machine
-    MachineId_t best_machine_id = -1;
-    double best_score = -1.0;
-
-    // Iterate over all machines
-    for (const auto& [machine_id, m_state] : machine_states) {
-        // Don't acknowledge machines without CPU compatibility
-        if (RequiredCPUType(task_id) != Machine_GetCPUType(machine_id)) 
-            continue;
-
-        // Calc score
-        double score = ComputeMachineScore(machine_id, task_id);
-        if (score > best_score) {
-            best_machine_id = machine_id;
-            best_score = score;
-        }
-    }
+    MachineId_t best_machine_id = GetBestScoreMachine(task_id); 
 
     if (best_machine_id == -1) {
         ThrowException("Scheduler::NewTask(): Couldn't find a machine for task " + to_string(task_id));
@@ -240,16 +341,103 @@ void DisplayProgressBar() {
         else if (i == pos) std::cout << ">";
         else std::cout << " ";
     }
-    std::cout << "] " << int(progress * 100.0) << " %\r";
+    std::cout << "] " << int(progress * 100.0) << " % - " << int(completed_tasks) << "/" << int(total_tasks) << "\r";
     std::cout.flush();
 }
 
+/*
+    Idea: We could track the last instruction we were at for that task, and then if it seems that we aren't on track for completion,
+    load balance it or up the priority
+*/
 void Scheduler::PeriodicCheck(Time_t now) {
     // This method should be called from SchedulerCheck()
     // SchedulerCheck is called periodically by the simulator to allow you to monitor, make decisions, adjustments, etc.
     // Unlike the other invocations of the scheduler, this one doesn't report any specific event
     // Recommendation: Take advantage of this function to do some monitoring and adjustments as necessary
     DisplayProgressBar();
+    
+    // We will run our load balancing algorithm here
+    
+    // Check if there are any tasks that are going to violate SLA
+}
+
+/* 
+    The taskID is not used, just to match the function pointer so we can pass it into 
+    GetBestScoreMachine
+*/
+double MachineUtilizationScore(MachineId_t machine_id, TaskId_t task_id) {
+    const unsigned W_UTIL = 5;
+    const unsigned W_MEM = 3;
+
+    MachineInfo_t m_info = Machine_GetInfo(machine_id);
+
+    // CPU util
+    double utilization_score = (double)m_info.active_vms / m_info.num_cpus;
+    // Mem util
+    double mem_score = (double)m_info.memory_used / m_info.memory_size;
+    
+    double final_score = (W_UTIL * utilization_score) + (W_MEM * mem_score);
+    double normalized_score = final_score / (W_UTIL + W_MEM);
+
+    return normalized_score;
+}
+// vector<double> util_scores;
+void LoadBalance() {
+    const double UNDERUTILIZED_THRESHOLD = 0.1;
+    vector<MachineId_t> underutilized_machines;
+
+    // Identify underutilized machines
+    for (auto& [machine_id, m_state] : machine_states) {
+        if (m_state.state != ON || m_state.vms.size() == 0) continue;
+
+        MachineInfo_t m_info = Machine_GetInfo(machine_id);
+        double utilization_score = MachineUtilizationScore(machine_id, -1);
+        // util_scores.push_back(utilization_score);
+        if (utilization_score < UNDERUTILIZED_THRESHOLD) {
+            // SimOutput("LoadBalance(): Machine " + to_string(machine_id) + " is underutilized with score: " + to_string(utilization_score) + "with active tasks: " + to_string(m_state.vms.size()), 0);
+            underutilized_machines.push_back(machine_id);
+        }
+    }
+
+    // Attempt migrations from underutilized machines - TBD: sort by util ascending
+    for (auto& machine_id : underutilized_machines) {
+        MachineInfo_t m_info = Machine_GetInfo(machine_id);
+        // Check if this machine has any VMs
+        if (m_info.active_vms == 0) continue;
+
+        // Iterate over all VMs on this machine
+        for (VMId_t vm_id : machine_states[machine_id].vms) {
+            // Maybe only migrate if SLA is not 0
+            VMInfo_t current_vm = VM_GetInfo(vm_id);
+            MachineId_t target_machine_id = GetBestScoreMachine(current_vm.active_tasks[0]); // Also assumes the task has same CPU type
+            if (target_machine_id == machine_id) {
+                // printf("HERE\n");
+                SimOutput("Target machine for migration is itself\n", 1);
+                continue;
+            }
+            else if (target_machine_id == -1) {
+                // printf("HERE\n");
+                SimOutput("No target machine for migration\n", 1);
+                continue;
+            }
+            // // Now migrate
+            // SimOutput("Start migration " + to_string(vm_id) + " from " + to_string(machine_id) + " to " + to_string(target_machine_id), 0);
+            // VM_Migrate(vm_id, target_machine_id);
+
+            // // Update the data structures
+            // machine_states[machine_id].vms.erase(vm_id);
+            // ongoing_migrations[vm_id] = target_machine_id;
+        }
+        
+        // If this machine is empty, turn it off
+        // Don't sleep the machine if we are migrating a VM to it currently
+        if (m_info.active_vms == 0 && total_on_machines > 1 && !Machine_IsMigrationTarget(machine_id)) {
+            Machine_SetState(machine_id, S2);
+            SimOutput("Scheduler::TaskComplete(): Machine " + to_string(machine_id) + " is now empty and is being turned off", 1);
+            machine_states[machine_id].state = TURNING_OFF;
+            total_on_machines--;
+        }
+    }
 }
 
 void Scheduler::Shutdown(Time_t time) {
@@ -260,8 +448,32 @@ void Scheduler::Shutdown(Time_t time) {
     for (auto id : vms) {
         VM_Shutdown(id);
     }
+    // std::cout << "Utilization Score Distribution:" << std::endl;
+    // for (double score : util_scores) {
+    //     std::cout << score << std::endl;
+    // }
     SimOutput("SimulationComplete(): Finished!", 4);
     SimOutput("SimulationComplete(): Time is " + to_string(time), 4);
+}
+
+void MigrateHelper(VMId_t vm_id, MachineId_t start_m, MachineId_t end_m) {
+    SimOutput("Start migration " + to_string(vm_id) + " from " + to_string(start_m) + " to " + to_string(end_m), 1);
+    VM_Migrate(vm_id, end_m);
+
+    // Update the data structures
+    machine_states[start_m].vms.erase(vm_id);
+    ongoing_migrations[vm_id] = end_m;
+
+    // Code for shutting down a VM
+   /*
+        // Don't sleep the machine if we are migrating a VM to it currently
+        if (m_info.active_vms == 0 && total_on_machines > 1 && !Machine_IsMigrationTarget(m_id)) {
+            Machine_SetState(m_id, S2);
+            SimOutput("Scheduler::TaskComplete(): Machine " + to_string(m_id) + " is now empty and is being turned off", 1);
+            machine_states[m_id].state = TURNING_OFF;
+            total_on_machines--;
+        }
+   */ 
 }
 
 void Scheduler::TaskComplete(Time_t now, TaskId_t task_id) {
@@ -272,80 +484,27 @@ void Scheduler::TaskComplete(Time_t now, TaskId_t task_id) {
     VMId_t vm_id = task_assignments[task_id];
     VMInfo_t vm_info = VM_GetInfo(vm_id);
     SimOutput("Scheduler::TaskComplete(): Task " + to_string(task_id) + " is complete at " + to_string(now) + " on vm " + to_string(vm_id), 1);
- 
-    if (VM_GetInfo(vm_id).active_tasks.size() != 0) {
-        ThrowException("Somehow there are active tasks on a VM?????");
-    }
+    
+    // if (VM_GetInfo(vm_id).active_tasks.size() != 0) {
+    //     ThrowException("Somehow there are active tasks on a VM?????");
+    // }
 
     // PROGRESS
     completed_tasks++;
+    total_sla[RequiredSLA(task_id)]++;
 
     // First, delete the task
     task_assignments.erase(task_id);
     // Delete the VM - only do this because there was only one task
     MachineId_t orig_m_id = vm_info.machine_id;
     machine_states[orig_m_id].vms.erase(vm_id);
-    SimOutput("Shutdown(): vm " + to_string(vm_id), 1);
 
     // The problem is trying to shut down a VM that is going through migration
-    if (!ongoing_migrations.count(vm_id))
+    if (!ongoing_migrations.count(vm_id) && vm_info.active_tasks.size() == 0) {
         VM_Shutdown(vm_id);
-
-    // Sort all machines in ascending order of memory used
-    vector<pair<MachineId_t, MachineState>> sorted_machines;
-    for (const auto& [machine_id, m_state] : machine_states) {
-        if (m_state.state == ON) sorted_machines.emplace_back(machine_id, m_state);
-    }
-    sort(sorted_machines.begin(), sorted_machines.end(), [](const pair<MachineId_t, MachineState>& a, const pair<MachineId_t, MachineState>& b) {
-        MachineInfo_t a_info = Machine_GetInfo(a.first);
-        MachineInfo_t b_info = Machine_GetInfo(b.first);
-        return a_info.memory_used < b_info.memory_used;
-    });
-
-    // Iterate over all machines 
-    for (unsigned i = 0; i < sorted_machines.size(); i++) {
-        MachineId_t m_id = sorted_machines[i].first;
-        MachineState m_state = sorted_machines[i].second;
-        // Iterate over all tasks - we can do this b/c only 1 task per VM
-        for (auto poss_vm_id : m_state.vms) {
-            TaskId_t task_id = VM_GetInfo(poss_vm_id).active_tasks[0];
-            TaskInfo_t task = GetTaskInfo(task_id);
-
-            // For each task, try and find a more loaded machine to migrate to
-            for (unsigned j = i + 1; j < sorted_machines.size(); j++) {
-                MachineId_t target_id = sorted_machines[j].first;
-                MachineInfo_t target_machine_info = Machine_GetInfo(target_id);
-                unsigned memory_left = target_machine_info.memory_size - target_machine_info.memory_used;
-                // If we can migrate this to a more loaded machine, do it
-                if (RequiredCPUType(task_id) == Machine_GetCPUType(target_id) && memory_left >= GetTaskMemory(task_id)) {
-                
-                    SimOutput("Start migration " + to_string(poss_vm_id) + " from " + to_string(m_id) + " to " + to_string(target_id), 1);
-                    VM_Migrate(poss_vm_id, target_id);
-
-                    // Update the data structures
-                    machine_states[m_id].vms.erase(poss_vm_id);
-                    ongoing_migrations[poss_vm_id] = target_id;
-                    // We can add the vm to the machines state of target in MigrationCompleted
-                    break; 
-                } 
-            }
-        }
-
-        // If this machine is now empty, turn it off
-        MachineInfo_t m_info = Machine_GetInfo(m_id);
-
-        // Don't sleep the machine if we are migrating a VM to it currently
-        if (m_info.active_vms == 0 && total_on_machines > 1 && !Machine_IsMigrationTarget(m_id)) {
-            Machine_SetState(m_id, S5);
-            SimOutput("Scheduler::TaskComplete(): Machine " + to_string(m_id) + " is now empty and is being turned off", 1);
-            machine_states[m_id].state = TURNING_OFF;
-            total_on_machines--;
-        }
-
     }
     
     PrintMachineToVMs();
-    
 }
 
 
@@ -388,11 +547,50 @@ void SchedulerCheck(Time_t time) {
 }
 
 void SimulationComplete(Time_t time) {
+    cout << "Detailed SLA Violation Report" << endl;
+    for (unsigned i = 0; i < NUM_SLAS; i++) {
+        if (total_sla[i] == 0) continue;
+
+        double violation_percentage = ((double)(sla_violations[i]) / total_sla[i]) * 100;
+        double compliance_percentage = 100.0 - violation_percentage;
+
+        // Determine if the SLA passed or failed
+        bool sla_passed = false;
+        double required_compliance = 0.0;
+        if (i == SLA0) {
+            required_compliance = 95.0;
+            if (compliance_percentage >= required_compliance) sla_passed = true;
+        } else if (i == SLA1) {
+            required_compliance = 90.0;
+            if (compliance_percentage >= required_compliance) sla_passed = true;
+        } else if (i == SLA2) {
+            required_compliance = 80.0;
+            if (compliance_percentage >= required_compliance) sla_passed = true;
+        } else if (i == SLA3) {
+            sla_passed = true; // SLA3 is best effort, always passes
+        }
+
+        // Output in green if passed, red if failed
+        if (sla_passed) {
+            cout << "\033[1;32m"; // Green text
+        } else {
+            cout << "\033[1;31m"; // Red text
+        }
+
+        cout << "SLA" << i << ": Violations = " << sla_violations[i] 
+             << "/" << total_sla[i] 
+             << " (" << violation_percentage << "% violations, " 
+             << compliance_percentage << "% compliance)" 
+             << " \033[1;35m[Required: " << required_compliance << "% compliance]\033[0m" << endl;
+
+        cout << "\033[0m"; // Reset text color
+    }
+
     // This function is called before the simulation terminates Add whatever you feel like.
-    cout << "SLA violation report" << endl;
-    cout << "SLA0: " << GetSLAReport(SLA0) << "%" << endl;
-    cout << "SLA1: " << GetSLAReport(SLA1) << "%" << endl;
-    cout << "SLA2: " << GetSLAReport(SLA2) << "%" << endl;     // SLA3 do not have SLA violation issues
+    // cout << "SLA violation report" << endl;
+    // cout << "SLA0: " << GetSLAReport(SLA0) << "%" << endl;
+    // cout << "SLA1: " << GetSLAReport(SLA1) << "%" << endl;
+    // cout << "SLA2: " << GetSLAReport(SLA2) << "%" << endl;     // SLA3 do not have SLA violation issues
     cout << "Total Energy " << Machine_GetClusterEnergy() << "KW-Hour" << endl;
     cout << "Simulation run finished in " << double(time)/1000000 << " seconds" << endl;
     SimOutput("SimulationComplete(): Simulation finished at time " + to_string(time), 4);
@@ -404,78 +602,8 @@ void SLAWarning(Time_t time, TaskId_t task_id) {
     // BUG: The violation comes in same time as completion, but we somehow go ahead with the migration instead of shutting down so 
     // the VM still exists on a different machine with no task?????????
     TaskInfo_t task = GetTaskInfo(task_id);
-   SimOutput("SLAWarning(): Got violation for " + to_string(task_id) + " at time " + to_string(time), 1);
-    if (task.completion <= time && task.remaining_instructions == 0) {
-        return;
-    }
-    // IGNORE ALL CODE BELOW THIS ITS WRONGGGGGGG
-    /* HERE WE ACTUALLY HAVE TO LOAD BALANCE EVERYTHING ELSE SINCE TASK_ID IS DONE */
-    // Sort all machines in ascending order of memory used
-    vector<pair<MachineId_t, MachineState>> sorted_machines;
-    vector<pair<MachineId_t, MachineState>> off_machines;
-    for (const auto& [machine_id, m_state] : machine_states) {
-        if (m_state.state == ON) sorted_machines.emplace_back(machine_id, m_state);
-        else {
-        off_machines.emplace_back(machine_id, m_state);
-        }
-    }
-    sort(sorted_machines.begin(), sorted_machines.end(), [](const pair<MachineId_t, MachineState>& a, const pair<MachineId_t, MachineState>& b) {
-        MachineInfo_t a_info = Machine_GetInfo(a.first);
-        MachineInfo_t b_info = Machine_GetInfo(b.first);
-        return a_info.memory_size - a_info.memory_used < b_info.memory_size - b_info.memory_used;
-    });
-
-    VMId_t vm_id = task_assignments[task_id];
-    VMInfo_t vm_info = VM_GetInfo(vm_id);
-    MachineId_t m_id = vm_info.machine_id;
-    MachineState m_state = machine_states[m_id];
-    // We have our task
-    
-    // Try and find a more loaded machine to migrate to
-    for (unsigned j = 0; j < sorted_machines.size(); j++) {
-        MachineId_t target_id = sorted_machines[j].first;
-        if (target_id == m_id) continue;
-
-        MachineInfo_t target_machine_info = Machine_GetInfo(target_id);
-        unsigned memory_left = target_machine_info.memory_size - target_machine_info.memory_used;
-        // If we can migrate this to a more loaded machine, do it
-        if (RequiredCPUType(task_id) == Machine_GetCPUType(target_id) && memory_left >= GetTaskMemory(task_id)) {
-            MachineInfo_t test = Machine_GetInfo(target_id);
-            VM_Migrate(vm_id, target_id);
-
-            // Update the data structures
-            machine_states[m_id].vms.erase(vm_id);
-            ongoing_migrations[vm_id] = target_id;
-            // We can add the vm to the machines state of target in MigrationCompleted
-            SimOutput("SLAWarning(): Finished migrating" + to_string(task_id), 1);
-            return; 
-        } 
-    }
-   
-
-   // We couldn't find an on machine, look at off
-   if (off_machines.size() > 0) {
-        for (auto& [machine_id, m_state] : off_machines) {
-            MachineInfo_t off_machine_info = Machine_GetInfo(machine_id);
-            if (m_state.state == OFF &&
-                RequiredCPUType(task_id) == Machine_GetCPUType(machine_id) &&
-                off_machine_info.memory_size >= GetTaskMemory(task_id)) {
-                // We have a compatible machine
-                Machine_SetState(machine_id, S0);
-                machine_states[machine_id].state = TURNING_ON;
-                VM_Migrate(vm_id, machine_id); // TBD::: Move this to state change???? PENDING?
-
-                // Update the data structures
-                machine_states[m_id].vms.erase(vm_id);
-                ongoing_migrations[vm_id] = machine_id;
-                // We can add the vm to the machines state of target in MigrationCompleted
-                SimOutput("SLAWarning(): Finished migrating" + to_string(task_id), 1);
-                return;
-            }
-        }
-   }
-
-   SimOutput("SLAWarning(): Got violation but couldn't migrate to any machine.", 1);
+    sla_violations[task.required_sla]++;
+    SimOutput("SLAWarning(): Got violation for " + to_string(task_id) + " at time " + to_string(time), 1);
 }
 
 void StateChangeComplete(Time_t time, MachineId_t machine_id) {
@@ -496,7 +624,7 @@ void StateChangeComplete(Time_t time, MachineId_t machine_id) {
             pending_attachments.erase(machine_id);
         }
         PrintMachineToVMs();
-    } else if (m_info.s_state == S5) {
+    } else if (m_info.s_state == S2) {
         // If we turned it off
         machine_states[machine_id].state = OFF; 
         // But we added pending tasks while turning it off, then we need to turn it back on OOPS! Really slow
