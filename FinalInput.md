@@ -103,7 +103,7 @@ task class:
         VM type: WIN
         GPU enabled: no
         SLA type: SLA3
-        CPU type: POWER
+        CPU type: ARM
         Task type: STREAM
         Seed: 54321
 }

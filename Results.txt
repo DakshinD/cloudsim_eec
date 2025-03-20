@@ -52,4 +52,22 @@ SLA3: Violations = 0/54 (0% violations, 100% compliance) [Required: 0% complianc
 Total Energy 3.41097KW-Hour
 Simulation run finished in 3606.42 seconds
 
-Experimental
+Experimental w/ Turning off and exponential state degradation over time 
+------------------------------------------------------------
+Detailed SLA Violation Report
+SLA0: Violations = 0/630 (0% violations, 100% compliance) [Required: 95% compliance]
+SLA1: Violations = 579/233695 (0.247759% violations, 99.7522% compliance) [Required: 90% compliance]
+SLA2: Violations = 104/22208 (0.4683% violations, 99.5317% compliance) [Required: 80% compliance]
+SLA3: Violations = 0/54 (0% violations, 100% compliance) [Required: 0% compliance]
+Total Energy 2.61654KW-Hour
+Simulation run finished in 3603.72 seconds
+
+Experimental but I changed the SLEEP_UNIT HOW DID THIS WORK
+------------------------------------------------------------
+Detailed SLA Violation Report
+SLA0: Violations = 0/630 (0% violations, 100% compliance) [Required: 95% compliance]
+SLA1: Violations = 579/233695 (0.247759% violations, 99.7522% compliance) [Required: 90% compliance]
+SLA2: Violations = 109/22208 (0.490814% violations, 99.5092% compliance) [Required: 80% compliance]
+SLA3: Violations = 0/54 (0% violations, 100% compliance) [Required: 0% compliance]
+Total Energy 0.902409KW-Hour
+Simulation run finished in 3603.72 seconds
