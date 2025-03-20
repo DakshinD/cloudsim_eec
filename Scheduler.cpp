@@ -21,16 +21,19 @@ enum MachinePowerState {
 
 struct MachineState { 
     set<VMId_t> vms;
-    unsigned memory_used; // not used currently
     MachinePowerState state;
 };
-// Progress Bar?? Only seen if -v 0
+
+const MachineState_t SLEEP_STATE = S2; // State we initially shut down empty PM to
+
+// Progress Bar
 unsigned total_tasks = 0;
 unsigned completed_tasks = 0;
 
 // Data Structures for state tracking
 unsigned total_machines = -1;
 unsigned total_on_machines = -1;
+
 map<TaskId_t, VMId_t> task_assignments;
 vector<VMId_t> vms;
 map<MachineId_t, MachineState> machine_states;
@@ -82,9 +85,8 @@ void Scheduler::Init() {
     total_tasks = GetNumTasks();
     for(unsigned i = 0; i < total_machines; i++) {
         machines.push_back(MachineId_t(i));
-        machine_states[i] = {{}, 0, ON};
-        // Set the default state of all machines to sleeping for greedy
-        // Machine_SetState (MachineId_t(i), S0);
+        machine_states[i] = {{}, ON};
+        // What is the default state of all machines for greedy, sleeping or on?
         SimOutput("Scheduler::Init(): Created machine id of " + to_string(i), 4);
     }    
 }
@@ -150,8 +152,9 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
 
     // If we still couldn't find anything, lets just add it to the first CPU compatible machine
     for (auto& [machine_id, m_state] : machine_states) {
-        // If this machine is on and is the right CPU type and has memory left
+       
         if (RequiredCPUType(task_id) == Machine_GetCPUType(machine_id)) {
+             // Add to pending or immediately depending on ON/OFF state
             if (m_state.state == OFF || m_state.state == TRANSITION) {
                 Machine_SetState(machine_id, S0);
                 machine_states[machine_id].state = TRANSITION;
@@ -283,7 +286,7 @@ void Scheduler::TaskComplete(Time_t now, TaskId_t task_id) {
 
         // Don't sleep the machine if we are migrating a VM to it currently
         if (m_info.active_vms == 0 && total_on_machines > 1 && !Machine_IsMigrationTarget(m_id)) {
-            Machine_SetState(m_id, S5);
+            Machine_SetState(m_id, SLEEP_STATE);
             SimOutput("Scheduler::TaskComplete(): Machine " + to_string(m_id) + " is now empty and is being turned off", 1);
             machine_states[m_id].state = TRANSITION;
             total_on_machines--;
@@ -351,78 +354,10 @@ void SLAWarning(Time_t time, TaskId_t task_id) {
     // BUG: The violation comes in same time as completion, but we somehow go ahead with the migration instead of shutting down so 
     // the VM still exists on a different machine with no task?????????
     TaskInfo_t task = GetTaskInfo(task_id);
-   SimOutput("SLAWarning(): Got violation for " + to_string(task_id) + " at time " + to_string(time), 1);
+    SimOutput("SLAWarning(): Got violation for " + to_string(task_id) + " at time " + to_string(time), 1);
     if (task.completion <= time && task.remaining_instructions == 0) {
         return;
     }
-    // IGNORE ALL CODE BELOW THIS ITS WRONGGGGGGG
-    /* HERE WE ACTUALLY HAVE TO LOAD BALANCE EVERYTHING ELSE SINCE TASK_ID IS DONE */
-    // Sort all machines in ascending order of memory used
-    vector<pair<MachineId_t, MachineState>> sorted_machines;
-    vector<pair<MachineId_t, MachineState>> off_machines;
-    for (const auto& [machine_id, m_state] : machine_states) {
-        if (m_state.state == ON) sorted_machines.emplace_back(machine_id, m_state);
-        else {
-        off_machines.emplace_back(machine_id, m_state);
-        }
-    }
-    sort(sorted_machines.begin(), sorted_machines.end(), [](const pair<MachineId_t, MachineState>& a, const pair<MachineId_t, MachineState>& b) {
-        MachineInfo_t a_info = Machine_GetInfo(a.first);
-        MachineInfo_t b_info = Machine_GetInfo(b.first);
-        return a_info.memory_size - a_info.memory_used < b_info.memory_size - b_info.memory_used;
-    });
-
-    VMId_t vm_id = task_assignments[task_id];
-    VMInfo_t vm_info = VM_GetInfo(vm_id);
-    MachineId_t m_id = vm_info.machine_id;
-    MachineState m_state = machine_states[m_id];
-    // We have our task
-    
-    // Try and find a more loaded machine to migrate to
-    for (unsigned j = 0; j < sorted_machines.size(); j++) {
-        MachineId_t target_id = sorted_machines[j].first;
-        if (target_id == m_id) continue;
-
-        MachineInfo_t target_machine_info = Machine_GetInfo(target_id);
-        unsigned memory_left = target_machine_info.memory_size - target_machine_info.memory_used;
-        // If we can migrate this to a more loaded machine, do it
-        if (RequiredCPUType(task_id) == Machine_GetCPUType(target_id) && memory_left >= GetTaskMemory(task_id)) {
-            MachineInfo_t test = Machine_GetInfo(target_id);
-            VM_Migrate(vm_id, target_id);
-
-            // Update the data structures
-            machine_states[m_id].vms.erase(vm_id);
-            ongoing_migrations[vm_id] = target_id;
-            // We can add the vm to the machines state of target in MigrationCompleted
-            SimOutput("SLAWarning(): Finished migrating" + to_string(task_id), 1);
-            return; 
-        } 
-    }
-   
-
-   // We couldn't find an on machine, look at off
-   if (off_machines.size() > 0) {
-        for (auto& [machine_id, m_state] : off_machines) {
-            MachineInfo_t off_machine_info = Machine_GetInfo(machine_id);
-            if (m_state.state == OFF &&
-                RequiredCPUType(task_id) == Machine_GetCPUType(machine_id) &&
-                off_machine_info.memory_size >= GetTaskMemory(task_id)) {
-                // We have a compatible machine
-                Machine_SetState(machine_id, S0);
-                machine_states[machine_id].state = TRANSITION;
-                VM_Migrate(vm_id, machine_id); // TBD::: Move this to state change???? PENDING?
-
-                // Update the data structures
-                machine_states[m_id].vms.erase(vm_id);
-                ongoing_migrations[vm_id] = machine_id;
-                // We can add the vm to the machines state of target in MigrationCompleted
-                SimOutput("SLAWarning(): Finished migrating" + to_string(task_id), 1);
-                return;
-            }
-        }
-   }
-
-   SimOutput("SLAWarning(): Got violation but couldn't migrate to any machine.", 1);
 }
 
 void StateChangeComplete(Time_t time, MachineId_t machine_id) {
@@ -443,7 +378,7 @@ void StateChangeComplete(Time_t time, MachineId_t machine_id) {
             pending_attachments.erase(machine_id);
         }
         PrintMachineToVMs();
-    } else if (m_info.s_state == S5) {
+    } else if (m_info.s_state == SLEEP_STATE) {
         // If we turned it off
         machine_states[machine_id].state = OFF; 
         // But we added pending tasks while turning it off, then we need to turn it back on OOPS! Really slow
