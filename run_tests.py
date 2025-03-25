@@ -283,8 +283,17 @@ def main():
             break
         print("Invalid choice. Please enter 1 or 2.")
 
+    # Ask for run name
+    run_name = input("Enter a name for this test run (press Enter for timestamp): ").strip()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    html_file = os.path.join(results_dir, f"test_report_{timestamp}.html")
+    
+    # Generate filename based on input
+    if run_name:
+        filename = f"test_report_{run_name}_{timestamp}.html"
+    else:
+        filename = f"test_report_{timestamp}.html"
+    
+    html_file = os.path.join(results_dir, filename)
 
     if mode == '1':
         print("\nRunning tests in serial mode...")
