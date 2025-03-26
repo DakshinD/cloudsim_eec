@@ -17,6 +17,7 @@
 #include <set>
 #include <algorithm>
 #include <cassert>
+#include <numeric>
 
 using std::map;
 using std::set;
@@ -37,7 +38,7 @@ struct MachineState {
 MachineState_t SLEEP_STATE = S0i1; // State we initially shut down empty PM to
 const int SLEEP_UNIT = 100000000; // (abritrarily chosen) could be diff for diff testcases?
 double MIN_MACHINE_PERCENT_IN_STATE = 0.00; // Try 0.3 works except for MatchMeIfYouCan
-const bool PROGRESS_BAR = false;
+const bool PROGRESS_BAR = true;
 const bool MACHINE_STATE = false;
 const bool TEST = false;
 
@@ -67,6 +68,80 @@ vector<VMId_t> vms;
 map<MachineId_t, MachineState> machine_states;
 map<MachineId_t, vector<TaskId_t>> pending_attachments; // We want to add VMs to a machine that is transitioning to ON but isnt ON yet.
 map<VMId_t, MachineId_t> ongoing_migrations;
+
+// BurstTracker by Claude 3.5 to detect bursts so we can change the sleep state for more accurate response times
+struct BurstTracker {
+    static const Time_t WINDOW_SIZE = 100000;    // 100K time window
+    static const int BURST_THRESHOLD = 50;       // Tasks per window to detect burst
+    static const int QUIET_THRESHOLD = 10;       // Tasks per window to detect end
+    static const int HISTORY_SIZE = 5;           // Track last 5 windows
+    static const int QUIET_WINDOWS = 3;          // Number of quiet windows before ending burst
+    
+    Time_t last_check;
+    int task_count;
+    bool in_burst;
+    vector<int> task_history;
+    MachineState_t current_sleep_state;
+    int quiet_window_count;
+    
+    BurstTracker() : last_check(0), task_count(0), in_burst(false), 
+                     current_sleep_state(S1), quiet_window_count(0) {
+        task_history.resize(HISTORY_SIZE, 0);
+    }
+    
+    bool updateBurstStatus(Time_t now) {
+        bool state_changed = false;
+        
+        // Check if window completed
+        if (now - last_check > WINDOW_SIZE) {
+            // Shift history
+            std::rotate(task_history.begin(), task_history.begin() + 1, task_history.end());
+            task_history.back() = task_count;
+            
+            // Calculate average tasks in recent windows
+            double avg_tasks = std::accumulate(task_history.begin(), 
+                                             task_history.end(), 
+                                             0.0) / HISTORY_SIZE;
+            
+            if (!in_burst && task_count > BURST_THRESHOLD) {
+                // Burst start detected
+                in_burst = true;
+                current_sleep_state = S0i1;
+                quiet_window_count = 0;
+                state_changed = true;
+                SimOutput("BurstTracker: Burst started. Switching to S0i1", 1);
+            }
+            else if (in_burst && task_count < QUIET_THRESHOLD) {
+                // Count quiet windows
+                quiet_window_count++;
+                
+                if (quiet_window_count >= QUIET_WINDOWS) {
+                    // Burst end detected after several quiet windows
+                    in_burst = false;
+                    current_sleep_state = S1;
+                    quiet_window_count = 0;
+                    state_changed = true;
+                    SimOutput("BurstTracker: Burst ended. Switching back to S1", 1);
+                }
+            }
+            else {
+                // Reset quiet window count if we see activity
+                quiet_window_count = 0;
+            }
+            
+            // Reset for new window
+            task_count = 0;
+            last_check = now;
+        }
+        
+        return state_changed;
+    }
+    
+    void recordTask() {
+        task_count++;
+    }
+};
+BurstTracker burst_tracker;
 
 // Reporting Data Structures
 int total_sla[NUM_SLAS] = {0};
@@ -140,11 +215,6 @@ void Debug() {
 }
 
 // Function that checks if the whole system is overloaded (all cores filled, a lot of tasks on each VM...)
-/*
-    Not really accurate though because hardcoded numbers, and the system could be doing fine with no SLA violations
-    even at these numbers. Maybe we have to take into account the number of machines left off, and the fewer
-    that are off at these numbers, the more overloaded we are
-*/
 bool IsSystemOverloaded() {
     unsigned total_cores = 0;
     unsigned used_cores = 0;
@@ -192,28 +262,11 @@ void SetMachinePState(MachineId_t machine_id) {
 
     // Calculate load factors
     double core_utilization = (double)machine_info.active_vms / machine_info.num_cpus;
-    double memory_utilization = (double)machine_info.memory_used / machine_info.memory_size;
-    double task_load = 0.0;
-
-    for (const auto& vm_id : machine_states[machine_id].vms) {
-        VMInfo_t vm_info = VM_GetInfo(vm_id);
-        task_load += vm_info.active_tasks.size();
-    }
-
-    // Normalize task load by the number of VMs
-    task_load = machine_states[machine_id].vms.size() > 0 ? task_load / machine_states[machine_id].vms.size() : 0.0;
-
-    // Determine the P-state based on utilization thresholds
-    if (core_utilization > 0.7 || memory_utilization > 0.8 || task_load > 10.0) {
-        Machine_SetCorePerformance(machine_id, -1, P1); // High performance state
-    } else if (core_utilization > 0.5 || memory_utilization > 0.5 || task_load > 5.0) {
-        Machine_SetCorePerformance(machine_id, -1, P2); // Medium performance state
-    } else if (core_utilization > 0.2 || memory_utilization > 0.2 || task_load > 2.0) {
-        Machine_SetCorePerformance(machine_id, -1, P2); // Low performance state
+    if (core_utilization == 0.0) {
+        Machine_SetCorePerformance(machine_id, -1, P3);
     } else {
-        Machine_SetCorePerformance(machine_id, -1, P2); // Energy-saving state
+        Machine_SetCorePerformance(machine_id, -1, P0);
     }
-    
     SimOutput("SetMachinePState(): Machine " + to_string(machine_id) + " set to P-state " + to_string(Machine_GetInfo(machine_id).p_state), 1);
 }
 
@@ -321,9 +374,7 @@ void Scheduler::Init() {
         SimOutput("Scheduler::Init(): Created machine id of " + to_string(i), 4);
     }    
 
-    // if (total_tasks > 10000) { // This is kinda cheese....and will probably end poorly...
-    //     SLEEP_STATE = S1;
-    // }
+    SLEEP_STATE = burst_tracker.current_sleep_state;
 }
 
 void Scheduler::MigrationComplete(Time_t time, VMId_t vm_id) {
@@ -497,6 +548,29 @@ MachineId_t GetBestScoreMachine(TaskId_t task_id) {
 Use objective function to find machine and add it according to machine state (ON/OFF)
 */
 void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
+    burst_tracker.recordTask();
+    if (burst_tracker.updateBurstStatus(now)) {
+        // get the new sleep state from burst tracker
+        SLEEP_STATE = burst_tracker.current_sleep_state;
+        
+        // log change
+        string message = burst_tracker.in_burst ? 
+            "Burst started! Changing sleep state to S0i1" :
+            "Burst ended! Changing sleep state back to S1";
+        SimOutput(message + " (Task count: " + 
+                 to_string(burst_tracker.task_count) + ")", 0);
+
+        for (auto& [machine_id, m_state] : machine_states) {
+            if (m_state.state == OFF) {
+                MachineInfo_t m_info = Machine_GetInfo(machine_id);
+                if (m_info.s_state > SLEEP_STATE) {
+                    state_count[m_info.s_state]--;
+                    Machine_SetState(machine_id, SLEEP_STATE);
+                }
+            }
+        }
+    }
+
     SimOutput("NewTask(): New task at time: " + to_string(now), 1);
     // Get the task parameters
     TaskInfo_t task = GetTaskInfo (task_id);
