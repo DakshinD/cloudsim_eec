@@ -535,7 +535,6 @@ MachineId_t GetBestScoreMachine(TaskId_t task_id) {
             continue;
         // Calc score
         double score = ComputeMachineScoreForAdd(machine_id, task_id);
-        // cout << "score: " << score << endl;
         if (score > best_score) {
             best_machine_id = machine_id;
             best_score = score;
@@ -566,6 +565,7 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
                 if (m_info.s_state > SLEEP_STATE) {
                     state_count[m_info.s_state]--;
                     Machine_SetState(machine_id, SLEEP_STATE);
+                    machine_states[machine_id].state = TURNING_OFF; 
                 }
             }
         }
