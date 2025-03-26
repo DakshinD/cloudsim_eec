@@ -35,23 +35,9 @@ struct MachineState {
     Time_t last_state_change;
 };
 
-MachineState_t SLEEP_STATE = S0i1; // State we initially shut down empty PM to
-const int SLEEP_UNIT = 100000000; // (abritrarily chosen) could be diff for diff testcases?
-double MIN_MACHINE_PERCENT_IN_STATE = 0.00; // Try 0.3 works except for MatchMeIfYouCan
 const bool PROGRESS_BAR = true;
 const bool MACHINE_STATE = false;
 const bool TEST = false;
-
-// Objective function weights
-const unsigned W_STATE = 5; // used to be 7 or 8
-const unsigned W_S_STATE = 3;
-const unsigned W_CORES = 8;
-const unsigned W_MEM = 8;
-const unsigned W_GPU = 2;
-const unsigned W_PRIORITY = 2;
-const unsigned W_PENDING = 4;
-const unsigned W_TIME = 0; // lower this if failing SLA?
-const unsigned W_MIPS = 2;
 
 // Progress Bar?? Only seen if -v 0
 unsigned total_tasks = 0;
@@ -68,80 +54,6 @@ vector<VMId_t> vms;
 map<MachineId_t, MachineState> machine_states;
 map<MachineId_t, vector<TaskId_t>> pending_attachments; // We want to add VMs to a machine that is transitioning to ON but isnt ON yet.
 map<VMId_t, MachineId_t> ongoing_migrations;
-
-// BurstTracker by Claude 3.5 to detect bursts so we can change the sleep state for more accurate response times
-struct BurstTracker {
-    static const Time_t WINDOW_SIZE = 100000;    // 100K time window
-    static const int BURST_THRESHOLD = 50;       // Tasks per window to detect burst
-    static const int QUIET_THRESHOLD = 10;       // Tasks per window to detect end
-    static const int HISTORY_SIZE = 5;           // Track last 5 windows
-    static const int QUIET_WINDOWS = 3;          // Number of quiet windows before ending burst
-    
-    Time_t last_check;
-    int task_count;
-    bool in_burst;
-    vector<int> task_history;
-    MachineState_t current_sleep_state;
-    int quiet_window_count;
-    
-    BurstTracker() : last_check(0), task_count(0), in_burst(false), 
-                     current_sleep_state(S1), quiet_window_count(0) {
-        task_history.resize(HISTORY_SIZE, 0);
-    }
-    
-    bool updateBurstStatus(Time_t now) {
-        bool state_changed = false;
-        
-        // Check if window completed
-        if (now - last_check > WINDOW_SIZE) {
-            // Shift history
-            std::rotate(task_history.begin(), task_history.begin() + 1, task_history.end());
-            task_history.back() = task_count;
-            
-            // Calculate average tasks in recent windows
-            double avg_tasks = std::accumulate(task_history.begin(), 
-                                             task_history.end(), 
-                                             0.0) / HISTORY_SIZE;
-            
-            if (!in_burst && task_count > BURST_THRESHOLD) {
-                // Burst start detected
-                in_burst = true;
-                current_sleep_state = S0i1;
-                quiet_window_count = 0;
-                state_changed = true;
-                SimOutput("BurstTracker: Burst started. Switching to S0i1", 1);
-            }
-            else if (in_burst && task_count < QUIET_THRESHOLD) {
-                // Count quiet windows
-                quiet_window_count++;
-                
-                if (quiet_window_count >= QUIET_WINDOWS) {
-                    // Burst end detected after several quiet windows
-                    in_burst = false;
-                    current_sleep_state = S1;
-                    quiet_window_count = 0;
-                    state_changed = true;
-                    SimOutput("BurstTracker: Burst ended. Switching back to S1", 1);
-                }
-            }
-            else {
-                // Reset quiet window count if we see activity
-                quiet_window_count = 0;
-            }
-            
-            // Reset for new window
-            task_count = 0;
-            last_check = now;
-        }
-        
-        return state_changed;
-    }
-    
-    void recordTask() {
-        task_count++;
-    }
-};
-BurstTracker burst_tracker;
 
 // Reporting Data Structures
 int total_sla[NUM_SLAS] = {0};
@@ -214,61 +126,6 @@ void Debug() {
     SimOutput(res, 0);
 }
 
-// Function that checks if the whole system is overloaded (all cores filled, a lot of tasks on each VM...)
-bool IsSystemOverloaded() {
-    unsigned total_cores = 0;
-    unsigned used_cores = 0;
-    unsigned total_tasks = 0;
-    unsigned total_vms = 0;
-
-    for (const auto& [machine_id, m_state] : machine_states) {
-        if (m_state.state != ON) continue; // Only consider machines that are ON
-
-        MachineInfo_t machine_info = Machine_GetInfo(machine_id);
-        total_cores += machine_info.num_cpus;
-        used_cores += machine_info.active_vms;
-        
-        for (const auto& vm_id : m_state.vms) {
-            VMInfo_t vm_info = VM_GetInfo(vm_id);
-            total_tasks += vm_info.active_tasks.size();
-            total_vms++;
-        }
-    }
-
-    // Define thresholds for overload
-    double core_utilization = (double)used_cores / total_cores;
-    double avg_tasks_per_vm = total_vms > 0 ? (double)total_tasks / total_vms : 0.0;
-    
-    unsigned total_machines = machine_states.size();
-    unsigned machines_off = total_machines - total_on_machines;
-    double machine_off_ratio = (double)machines_off / total_machines;
-
-    // System is considered overloaded if core utilization exceeds 90% or average tasks per VM exceed 10
-    if (machine_off_ratio < 0.5 && (core_utilization > 0.9 || avg_tasks_per_vm > 10.0)) {
-        SimOutput("IsSystemOverloaded(): System is overloaded. Core utilization: " + to_string(core_utilization * 100) + "%, Avg tasks per VM: " + to_string(avg_tasks_per_vm), 1);
-        return true;
-    }
-
-    SimOutput("IsSystemOverloaded(): System is not overloaded. Core utilization: " + to_string(core_utilization * 100) + "%, Avg tasks per VM: " + to_string(avg_tasks_per_vm), 1);
-    return false;
-}
-
-/*
-    Sets the machine P-state by determining load on it (whether that encompasses number of cores filled, memory, number of total tasks, etc.)
-*/
-void SetMachinePState(MachineId_t machine_id) {
-    MachineInfo_t machine_info = Machine_GetInfo(machine_id);
-    if (machine_info.s_state != S0) return;
-
-    // Calculate load factors
-    double core_utilization = (double)machine_info.active_vms / machine_info.num_cpus;
-    if (core_utilization == 0.0) {
-        Machine_SetCorePerformance(machine_id, -1, P3);
-    } else {
-        Machine_SetCorePerformance(machine_id, -1, P0);
-    }
-    SimOutput("SetMachinePState(): Machine " + to_string(machine_id) + " set to P-state " + to_string(Machine_GetInfo(machine_id).p_state), 1);
-}
 
 /*
     We need to choose a VM based on priority, but also CPU type and GPU, have a VM have same CPU/GPU type 
@@ -396,154 +253,6 @@ void Scheduler::MigrationComplete(Time_t time, VMId_t vm_id) {
 }
 
 /*
-    1. On/off state
-    2. Core?
-    3. Memory 
-    4. GPU
-    5. # of pending if OFF
-    6. Priority/SLA??? TBD
-    7. S State of machine
-    8. MIPS
-*/
-double ComputeMachineScoreForAdd(MachineId_t machine_id, TaskId_t task_id) {
-    MachineInfo_t machine_info = Machine_GetInfo(machine_id);
-    MachineState machine_state = machine_states[machine_id];
-    TaskInfo_t task = GetTaskInfo(task_id);
-
-    // On/off state 
-    double state_score;
-    if (machine_state.state == ON) { // Change this to use S states for more specificity later
-        state_score = 1.0;
-    } else if (machine_state.state == TURNING_ON) {
-        state_score = 0.7;
-    } else if (machine_state.state == OFF) {
-        state_score = 0.5;
-    } else {
-        state_score = 0.2;
-    }
-
-    // S state
-    double s_state_score;
-    if (machine_info.s_state == S0) {
-        s_state_score = 1.0;
-    } else if (machine_info.s_state == S0i1) {
-        s_state_score = 0.88;
-    } else if (machine_info.s_state == S1) {
-        s_state_score = 0.8;
-    } else if (machine_info.s_state == S2) {
-        s_state_score = 0.6;
-    } else if (machine_info.s_state == S3) {
-        s_state_score = 0.4;
-    } else if (machine_info.s_state == S4) {
-        s_state_score = 0.2;
-    } else {
-        s_state_score = 0.1;
-    }
-
-    // Time since last state change?
-    double time_score;
-    // If we are on, we don't want this affecting us, if we are off, it matters
-    if (machine_state.state == ON) {
-        time_score = 1.0;
-    } else {
-        // If we are off, we want to choose machines that have been off for a shorter amount of time
-        double time_since_change = (Now() - machine_state.last_state_change) / 10000.0; 
-        time_score = 1.0 / (1.0 + time_since_change); // Higher score for shorter time since last state change
-    }
-
-    // CPU cores
-    double core_score;
-    if (machine_info.active_vms >= machine_info.num_cpus) {
-        core_score = 0.0;
-    } else {
-        // We weight already loaded machines higher? How is this different from greedy?
-        core_score = (double)machine_info.active_vms / machine_info.num_cpus;
-    }
-
-    // Memory 
-    double mem_score = 1.0 - (double)machine_info.memory_used / machine_info.memory_size;
-    if (mem_score < 0) mem_score = 0.0;
-
-    // GPU
-    double gpu_score = (machine_info.gpus && task.gpu_capable) ? 1.0 : 0.0;
-
-    // Priority score
-    double priority_score = 0.0;
-    Priority_t task_priority = task.priority;
-
-    for (const auto& vm_id : machine_state.vms) {
-        VMInfo_t vm_info = VM_GetInfo(vm_id);
-
-        switch (task_priority) {
-            case HIGH_PRIORITY:
-                // Prefer machines with fewer high-priority tasks
-                priority_score += std::count_if(vm_info.active_tasks.begin(), vm_info.active_tasks.end(), [](TaskId_t t) {
-                    return GetTaskInfo(t).priority == HIGH_PRIORITY;
-                });
-                break;
-
-            case MID_PRIORITY:
-                // Prefer machines with fewer high and medium-priority tasks
-                priority_score += std::count_if(vm_info.active_tasks.begin(), vm_info.active_tasks.end(), [](TaskId_t t) {
-                    Priority_t p = GetTaskInfo(t).priority;
-                    return p == HIGH_PRIORITY || p == MID_PRIORITY;
-                });
-                break;
-
-            case LOW_PRIORITY:
-                // Prefer machines with fewer total tasks
-                priority_score += vm_info.active_tasks.size();
-                break;
-        }
-    }
-
-    // Normalize priority score (lower is better)
-    priority_score = 1.0 / (1.0 + priority_score);
-
-    // MIPS score
-    double mips_score = (double)machine_info.performance[machine_info.p_state] / 3000.0; // Normalize to max MIPS
-    if (task.required_sla == SLA1) {
-        // Give SLA1 tasks preference for higher MIPS machines when they're less loaded
-        mips_score *= (1.0 - ((double)machine_info.active_vms / machine_info.num_cpus));
-    }
-
-    // Calculate final score with weights // (W_TIME * time_score) + Using time may ruin SLA because we shutdown more machines
-    double total_score = (W_STATE * state_score) + 
-                            (W_S_STATE * s_state_score) +
-                            (W_CORES * core_score) + 
-                            (W_MEM * mem_score) + 
-                            (W_TIME * time_score) +
-                            (W_PRIORITY * priority_score) +
-                            (W_MIPS * mips_score) +
-                            (W_GPU * gpu_score) -
-                            (W_PENDING * (double)pending_attachments[machine_id].size());
-    
-    return total_score;
-}
-
-/*
-    Can we turn this for a VM, its not like we are only migrating 1 task? 
-    So 
-*/
-MachineId_t GetBestScoreMachine(TaskId_t task_id) {
-    // Iterate over all machines
-    double best_score = -__DBL_MAX__;
-    MachineId_t best_machine_id = -1;
-    for (const auto& [machine_id, m_state] : machine_states) {
-        // Don't acknowledge machines without CPU compatibility
-        if (RequiredCPUType(task_id) != Machine_GetCPUType(machine_id)) 
-            continue;
-        // Calc score
-        double score = ComputeMachineScoreForAdd(machine_id, task_id);
-        if (score > best_score) {
-            best_machine_id = machine_id;
-            best_score = score;
-        }
-    }
-    return best_machine_id;
-}
-
-/*
 Use objective function to find machine and add it according to machine state (ON/OFF)
 */
 void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
@@ -657,107 +366,6 @@ void MigrateHelper(VMId_t vm_id, MachineId_t start_m, MachineId_t end_m) {
     ongoing_migrations[vm_id] = end_m;
 }
 
-/*
-Horrible on time, SLA, and energy due to migrating only being worth if it is a long process, else the extra time taken is useless
-- For futher optimization, try load balancing tasks/VMs to consolidate light machines
-    a. To start, just sort by least vms, and migrate them to machines with open cores (sort descending machines below max cores)
-*/
-void LoadBalanceTasks() {
-    // Step 1: Identify heavily loaded VMs
-    vector<pair<VMId_t, size_t>> heavy_vms;
-    for (const auto& [machine_id, m_state] : machine_states) {
-        if (m_state.state != ON) continue; // Only consider machines that are ON
-        for (const auto& vm_id : m_state.vms) {
-            VMInfo_t vm_info = VM_GetInfo(vm_id);
-            if (vm_info.active_tasks.size() > 10) { // Threshold for heavily loaded VMs
-                heavy_vms.emplace_back(vm_id, vm_info.active_tasks.size());
-            }
-        }
-    }
-
-    // Sort heavily loaded VMs by the number of tasks (descending)
-    std::sort(heavy_vms.begin(), heavy_vms.end(),
-              [](const auto& a, const auto& b) { return a.second > b.second; });
-
-    // Step 2: Identify lightly loaded VMs
-    vector<pair<VMId_t, size_t>> light_vms;
-    for (const auto& [machine_id, m_state] : machine_states) {
-        if (m_state.state != ON) continue; // Only consider machines that are ON
-        for (const auto& vm_id : m_state.vms) {
-            VMInfo_t vm_info = VM_GetInfo(vm_id);
-            if (vm_info.active_tasks.size() < 5) { // Threshold for lightly loaded VMs
-                light_vms.emplace_back(vm_id, vm_info.active_tasks.size());
-            }
-        }
-    }
-
-    // Sort lightly loaded VMs by the number of tasks (ascending)
-    std::sort(light_vms.begin(), light_vms.end(),
-              [](const auto& a, const auto& b) { return a.second < b.second; });
-
-    // Step 3: Balance tasks between heavily and lightly loaded VMs
-    for (auto& [heavy_vm_id, heavy_task_count] : heavy_vms) {
-        VMInfo_t heavy_vm_info = VM_GetInfo(heavy_vm_id);
-        vector<TaskId_t> tasks_to_migrate(heavy_vm_info.active_tasks.begin(), heavy_vm_info.active_tasks.end());
-
-        for (auto& [light_vm_id, light_task_count] : light_vms) {
-            if (heavy_task_count <= light_task_count + 1) break; // Stop if tasks are balanced
-
-            VMInfo_t light_vm_info = VM_GetInfo(light_vm_id);
-
-            // Check compatibility and migrate tasks
-            for (auto task_id : tasks_to_migrate) {
-                TaskInfo_t task_info = GetTaskInfo(task_id);
-
-                // Check compatibility (e.g., VM type, CPU type, memory availability)
-                bool compatible_vm_type = light_vm_info.vm_type == RequiredVMType(task_id);
-                bool compatible_cpu_type = light_vm_info.cpu == RequiredCPUType(task_id);
-                MachineInfo_t m_info = Machine_GetInfo(light_vm_info.machine_id);
-                bool sufficient_memory = m_info.memory_size - m_info.memory_used >= GetTaskMemory(task_id);
-
-                if (!IsTaskCompleted(task_id) && compatible_vm_type && compatible_cpu_type && sufficient_memory) {
-                    // Migrate the task
-                    DebugVM(heavy_vm_id);
-                    VM_RemoveTask(heavy_vm_id, task_id);
-                    VM_AddTask(light_vm_id, task_id, task_info.priority);
-                    task_assignments[task_id] = light_vm_id;
-
-                    SimOutput("LoadBalanceTasks(): Migrated task " + to_string(task_id) +
-                              " from VM " + to_string(heavy_vm_id) +
-                              " to VM " + to_string(light_vm_id), 0);
-
-                    // Update task counts
-                    heavy_task_count--;
-                    light_task_count++;
-
-                    // Break if tasks are balanced
-                    if (heavy_task_count <= light_task_count + 1) break;
-                }
-            }
-
-            // Break if tasks are balanced
-            if (heavy_task_count <= light_task_count + 1) break;
-        }
-    }
-}
-
-// Helper method to bring the least asleep machine back on
-MachineId_t ChangeBestMachineState(MachineState_t less_than = S0) {
-    for (int state = less_than + 1; state <= S5; ++state) {
-        if (state_count[MachineState_t(state)] < 0) continue;
-        for (const auto& [machine_id, m_state] : machine_states) {
-            if (m_state.state == OFF && Machine_GetInfo(machine_id).s_state == state) {
-                state_count[MachineState_t(state)]--;
-                Machine_SetState(machine_id, S0);
-                machine_states[machine_id].state = TURNING_ON;
-                SimOutput("BringLeastSleepMachineOn(): Turning on machine " + to_string(machine_id) + " from state S" + to_string(state), 1);
-                return machine_id;
-            }
-        }
-    }
-    SimOutput("BringLeastSleepMachineOn(): No machines available to turn on", 1);
-    return -1; // No machine found
-}
 
 /*
     Idea: We could track the last instruction we were at for that task, and then if it seems that we aren't on track for completion,
@@ -770,66 +378,6 @@ void Scheduler::PeriodicCheck(Time_t now) {
     if (MACHINE_STATE) {
         DisplayMachineStates();
     }
-
-    if (IsSystemOverloaded()) {
-        double prev = MIN_MACHINE_PERCENT_IN_STATE;
-        MIN_MACHINE_PERCENT_IN_STATE = std::min(0.6, MIN_MACHINE_PERCENT_IN_STATE + 0.5); // Increase by 5%, cap at 50%
-        SimOutput("PeriodicCheck(): Increased MIN_MACHINE_PERCENT_IN_STATE to " + to_string(MIN_MACHINE_PERCENT_IN_STATE), 1);
-        for (unsigned i = 0; i < int(total_machines * (MIN_MACHINE_PERCENT_IN_STATE-prev)); i++) {
-            ChangeBestMachineState();
-        } 
-    } 
-    
-    // Turn off PMs that don't have anything on them
-    for (auto& [machine_id, m_state] : machine_states) {
-        if (m_state.state == OFF || m_state.state == TURNING_OFF) continue;
-        if (pending_attachments[machine_id].size() > 0) continue;
-
-        MachineInfo_t m_info = Machine_GetInfo(machine_id);
-        if (m_info.active_tasks > 0) continue;
-        // If this machine is empty, turn it off
-        // Don't sleep the machine if we are migrating a VM to it currently - (int)(total_machines * 0.1)
-        if (m_info.active_vms == 0 && total_on_machines > 1 + int(total_machines * MIN_MACHINE_PERCENT_IN_STATE) && !Machine_IsMigrationTarget(machine_id)) {
-            state_count[m_info.s_state]--;
-            Machine_SetState(machine_id, SLEEP_STATE);
-            SimOutput("Scheduler::PeriodicCheck(): Machine " + to_string(machine_id) + " is now empty and is being turned off", 1);
-            machine_states[machine_id].state = TURNING_OFF;
-            total_on_machines--;
-            on_cpu_count[m_info.cpu]--;
-        }
-    }
-
-    // TBD: Maybe we can track the time since a machine has been off, if its been a long time, lower the S state
-    // We need to make sure theres a certain # of machines in S0 or S1 if we want to take machines to lower states
-    
-    for (auto& [machine_id, m_state] : machine_states) {
-        MachineState_t curr_s_state = Machine_GetInfo(machine_id).s_state;
-        if (m_state.state != OFF) continue;
-
-        // Calculate the time threshold for transitioning to a lower S state.
-        Time_t time_threshold = SLEEP_UNIT * (1 << (Machine_GetInfo(machine_id).s_state - SLEEP_STATE));
-
-        // Define the minimum percentage required for each state dynamically.
-        double min_percentage_in_state = MIN_MACHINE_PERCENT_IN_STATE / (1 << (curr_s_state - SLEEP_STATE));
-
-        // Check if the machine has been in its current state longer than the calculated threshold.
-        // Ensure the minimum percentage condition is met for the current state.
-        if (now - m_state.last_state_change > time_threshold && state_count[curr_s_state] > (int)(total_machines * min_percentage_in_state)) {
-            // If it's been a long time, lower the S state
-            int new_state = Machine_GetInfo(machine_id).s_state + 1;
-            if (new_state > S5) continue;
-            state_count[curr_s_state]--;
-            Machine_SetState(machine_id, MachineState_t(new_state));
-            machine_states[machine_id].state = TURNING_OFF; // - NECESSARY?
-        }
-    }
-
-    // for (auto& m_id : machines) {
-    //     SetMachinePState (m_id);
-    // }
-    // We will run our load balancing algorithm here
-    
-    // Check if there are any tasks that are going to violate SLA
 }
 
 void Scheduler::Shutdown(Time_t time) {
@@ -866,8 +414,6 @@ void Scheduler::TaskComplete(Time_t now, TaskId_t task_id) {
     }
     assert(machine_states[orig_m_id].vms.size() == Machine_GetInfo(orig_m_id).active_vms); 
 }
-
-
 
 // Public interface below
 
