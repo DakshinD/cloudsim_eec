@@ -27,7 +27,8 @@ struct MachineState {
     MachinePowerState state;
 };
 
-const MachineState_t SLEEP_STATE = S4; // State we initially shut down empty PM to
+const MachineState_t SLEEP_STATE = S5; // State we initially shut down empty PM to
+double MIN_MACHINE_PERCENT_IN_STATE = 0.5;
 const bool PROGRESS_BAR = true;
 const bool MACHINE_STATE = false;
 const bool TEST = false;
@@ -310,8 +311,6 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
     ThrowException("Scheduler::NewTask(): No compatible machines found for task " + to_string(task_id));
 }
 
-
-
 void Scheduler::PeriodicCheck(Time_t now) {
     if (PROGRESS_BAR) {
         DisplayProgressBar();
@@ -375,7 +374,7 @@ void Scheduler::TaskComplete(Time_t now, TaskId_t task_id) {
     }
     
     // sort machines by utilization in ascending order
-    const double UTIL_THRESHOLD = 0.17; 
+    const double UTIL_THRESHOLD = 0.1; 
     vector<pair<MachineId_t, double>> sorted_machines;
     
     for (const auto& [machine_id, m_state] : machine_states) {
@@ -423,7 +422,7 @@ void Scheduler::TaskComplete(Time_t now, TaskId_t task_id) {
         // If machine is empty after migrations, shut it down
         MachineInfo_t m_info = Machine_GetInfo(source_id);
         if (all_vms_migrated && m_info.active_vms == 0 && 
-            total_on_machines > 1 && !Machine_IsMigrationTarget(source_id)) {
+            total_on_machines > int(MIN_MACHINE_PERCENT_IN_STATE * total_machines) && !Machine_IsMigrationTarget(source_id)) {
             
             Machine_SetState(source_id, SLEEP_STATE);
             machine_states[source_id].state = TURNING_OFF;
@@ -534,7 +533,7 @@ void SLAWarning(Time_t time, TaskId_t task_id) {
               " at time " + to_string(time) + 
               " on machine " + to_string(problem_machine) + 
               " (util: " + to_string(initial_util) + ")", 1);
-
+    
     if (initial_util > 0.8) {  // only migrate if utilization is significant
         vector<pair<MachineId_t, double>> sorted_machines;
         // get all ON machines except the problem machine
