@@ -19,6 +19,7 @@ enum MachinePowerState {
     TURNING_ON = 1, 
     TURNING_OFF = 2,
     OFF = 3,
+    STANDBY = 4,
 };
 
 
@@ -318,6 +319,61 @@ struct MachineScore {
 */
 void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
     SimOutput("NewTask(): New task at time: " + to_string(now), 1);
+
+    CPUType_t cpu_type = RequiredCPUType(task_id);
+    unsigned task_memory = GetTaskMemory(task_id);
+
+    // calculate the average memory per task of this cpu type
+    tasks_per_cpu_type[cpu_type]++;
+    avg_memory_per_task_of_cpu_type[cpu_type] = 
+        (avg_memory_per_task_of_cpu_type[cpu_type] * (tasks_per_cpu_type[cpu_type] - 1) + task_memory) 
+        / tasks_per_cpu_type[cpu_type];
+
+    unsigned num_cores_available = 0;
+    unsigned memory_available = 0;
+
+    for (const auto& [machine_id, m_state] : machine_states) {
+        if (m_state.state == ON && cpu_type == Machine_GetCPUType(machine_id)) {
+            MachineInfo_t machine_info = Machine_GetInfo(machine_id);
+            num_cores_available += (machine_info.num_cpus - machine_info.active_vms);
+            memory_available += (machine_info.memory_size - machine_info.memory_used);
+        }
+    }
+
+    if (num_cores_available <= 2 || memory_available <= avg_memory_per_task_of_cpu_type[cpu_type]) {
+        // We need to turn on a machine from standby
+        for (const auto& [machine_id, m_state] : machine_states) {
+            if (m_state.state == STANDBY && cpu_type == Machine_GetCPUType(machine_id)) {
+                Machine_SetState(machine_id, S0);
+                machine_states[machine_id].state = TURNING_ON;
+                // pending_attachments[machine_id].push_back(task_id);
+            }
+        }
+
+        // Check if we need to turn a machine from off to standby
+        double standby_ratio = 0;
+        unsigned total_machines_of_cpu_type = 0;
+        for (const auto& [machine_id, m_state] : machine_states) {
+            if (cpu_type == Machine_GetCPUType(machine_id)) {
+                total_machines_of_cpu_type++;
+                if (m_state.state == STANDBY) standby_ratio++;
+            }
+        }
+
+        standby_ratio = standby_ratio / total_machines_of_cpu_type;
+        if (standby_ratio < 0.3) {
+            // We need to turn on a machine from off
+            for (const auto& [machine_id, m_state] : machine_states) {
+                if (m_state.state == OFF && cpu_type == Machine_GetCPUType(machine_id)) {
+                    Machine_SetState(machine_id, S3);
+                    machine_states[machine_id].state = TURNING_OFF;
+                    // pending_attachments[machine_id].push_back(task_id);
+                }
+            }
+        }
+    }    
+
+    // Get the task parameters
     // Get the task parameters
     TaskInfo_t task = GetTaskInfo (task_id);
 
