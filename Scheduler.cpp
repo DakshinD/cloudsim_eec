@@ -48,6 +48,13 @@ map<MachineId_t, MachineState> machine_states;
 map<MachineId_t, vector<TaskId_t>> pending_attachments; // We want to add VMs to a machine that is transitioning to ON but isnt ON yet.
 map<VMId_t, MachineId_t> ongoing_migrations;
 
+// Data Structures for E-eco implementation
+const double num_on_machines_init = .3;
+const double num_standby_machines_init = .3;
+const double num_off_machines_init = .4;
+map<CPUType_t, unsigned> tasks_per_cpu_type;
+map<CPUType_t, double> avg_memory_per_task_of_cpu_type;
+
 // Reporting Data Structures
 int total_sla[NUM_SLAS] = {0};
 int sla_violations[NUM_SLAS] = {0};
