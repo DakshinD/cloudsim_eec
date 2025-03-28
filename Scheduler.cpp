@@ -212,14 +212,61 @@ void Scheduler::Init() {
     SimOutput("Scheduler::Init(): Initializing scheduler", 1);
 
     total_machines = Machine_GetTotal();
-    total_on_machines = total_machines;
     total_tasks = GetNumTasks();
+
+    // Group machines by CPU type first
+    map<CPUType_t, vector<MachineId_t>> machines_by_cpu;
     for(unsigned i = 0; i < total_machines; i++) {
         machines.push_back(MachineId_t(i));
-        machine_states[i] = {{}, ON};
-        // What is the default state of all machines for greedy, sleeping or on?
-        SimOutput("Scheduler::Init(): Created machine id of " + to_string(i), 4);
-    }    
+        CPUType_t cpu_type = Machine_GetCPUType(i);
+        machines_by_cpu[cpu_type].push_back(i);
+    }
+
+    // For each CPU type, distribute machines according to e-eco ratios
+    for(auto& [cpu_type, cpu_machines] : machines_by_cpu) {
+        unsigned cpu_total = cpu_machines.size(); 
+        
+        // Calculate number of machines for each state using e-eco ratios
+        unsigned num_on = cpu_total * num_on_machines_init;        // 30%
+        unsigned num_standby = cpu_total * num_standby_machines_init;  // 30%
+        unsigned num_off = cpu_total * num_off_machines_init;      // 40%
+
+        SimOutput("Scheduler::Init(): CPU Type " + to_string(cpu_type) + 
+                 " distribution - ON: " + to_string(num_on) + 
+                 ", STANDBY: " + to_string(num_standby) + 
+                 ", OFF: " + to_string(num_off), 1);
+
+        // Distribute machines across states
+        unsigned machine_index = 0;
+        
+        // Set ON machines
+        for(unsigned i = 0; i < num_on; i++) {
+            MachineId_t machine_id = cpu_machines[machine_index++];
+            machine_states[machine_id] = {{}, ON};
+            Machine_SetState(machine_id, S0);
+            total_on_machines++;
+            SimOutput("Scheduler::Init(): Machine " + to_string(machine_id) + 
+                     " (CPU " + to_string(cpu_type) + ") set to ON", 1);
+        }
+
+        // Set STANDBY machines
+        for(unsigned i = 0; i < num_standby; i++) {
+            MachineId_t machine_id = cpu_machines[machine_index++];
+            machine_states[machine_id] = {{}, STANDBY};
+            Machine_SetState(machine_id, S3);
+            SimOutput("Scheduler::Init(): Machine " + to_string(machine_id) + 
+                     " (CPU " + to_string(cpu_type) + ") set to STANDBY", 1);
+        }
+        
+        // Set remaining machines to OFF
+        while(machine_index < cpu_machines.size()) {
+            MachineId_t machine_id = cpu_machines[machine_index++];
+            machine_states[machine_id] = {{}, OFF};
+            Machine_SetState(machine_id, S5);
+            SimOutput("Scheduler::Init(): Machine " + to_string(machine_id) + 
+                     " (CPU " + to_string(cpu_type) + ") set to OFF", 1);
+        }
+    }  
 }
 
 /* Adding a task methods */
