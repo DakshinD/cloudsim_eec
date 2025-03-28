@@ -1,0 +1,827 @@
+
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>CloudSim Test Results - 2025-03-28 17:56:54</title>
+        <style>
+            body { 
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; 
+                margin: 40px auto;
+                max-width: 1200px;
+                padding: 0 20px;
+                line-height: 1.6;
+            }
+            .test-case { 
+                margin-bottom: 30px;
+                border: 1px solid #e1e4e8;
+                border-radius: 6px;
+                padding: 20px;
+                background: #fff;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            }
+            .test-header {
+                border-bottom: 1px solid #e1e4e8;
+                margin-bottom: 15px;
+                padding-bottom: 10px;
+            }
+            .pass { color: #28a745; }
+            .fail { color: #dc3545; }
+            .summary-table {
+                width: 100%;
+                border-collapse: collapse;
+                margin: 20px 0 30px 0;
+                font-size: 0.9em;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            }
+            .summary-table th, .summary-table td {
+                padding: 12px;
+                text-align: left;
+                border: 1px solid #e1e4e8;
+            }
+            .summary-table th {
+                background: #f6f8fa;
+                font-weight: 600;
+            }
+            .summary-table tr:hover {
+                background-color: #f8f9fa;
+            }
+            .compliance-cell {
+                text-align: center;
+                padding: 4px 8px;
+                border-radius: 4px;
+                width: 80px;
+                display: inline-block;
+            }
+            .compliance-high { background-color: #d4edda; }
+            .compliance-med { background-color: #fff3cd; }
+            .compliance-low { background-color: #f8d7da; }
+            .sla-table { /* ... existing sla-table styles ... */ }
+            .metrics { /* ... existing metrics styles ... */ }
+            .summary { /* ... existing summary styles ... */ }
+        </style>
+    </head>
+    <body>
+        <h1>CloudSim Test Results - 2025-03-28 17:56:54</h1>
+        
+        <table class="summary-table">
+            <tr>
+                <th>Test Case</th>
+                <th>Status</th>
+                <th>SLA0</th>
+                <th>SLA1</th>
+                <th>SLA2</th>
+                <th>SLA3</th>
+                <th>Energy (KW-Hour)</th>
+                <th>Runtime (s)</th>
+            </tr>
+    <tr><td>BigSmall.md</td><td><span class='testcase-status pass'>✓ PASS</span></td><td><div class="compliance-cell compliance-high">100.0%</div></td><td><div class="compliance-cell compliance-high">100.0%</div></td><td>-</td><td>-</td><td>0.03</td><td>28.62</td></tr><tr><td>BurstCycle.md</td><td><span class='testcase-status fail'>✗ FAIL</span></td><td><div class="compliance-cell compliance-low">62.5%</div></td><td><div class="compliance-cell compliance-high">100.0%</div></td><td>-</td><td>-</td><td>0.00</td><td>1.68</td></tr><tr><td>Day.md</td><td><span class='testcase-status pass'>✓ PASS</span></td><td>-</td><td>-</td><td><div class="compliance-cell compliance-high">99.9%</div></td><td>-</td><td>1.59</td><td>86401.10</td></tr><tr><td>FinalInput.md</td><td><span class='testcase-status pass'>✓ PASS</span></td><td><div class="compliance-cell compliance-high">100.0%</div></td><td><div class="compliance-cell compliance-high">100.0%</div></td><td><div class="compliance-cell compliance-high">100.0%</div></td><td><div class="compliance-cell compliance-high">100.0%</div></td><td>0.65</td><td>301.32</td></tr><tr><td>GentlerHour.md</td><td><span class='testcase-status pass'>✓ PASS</span></td><td><div class="compliance-cell compliance-high">100.0%</div></td><td><div class="compliance-cell compliance-high">100.0%</div></td><td><div class="compliance-cell compliance-high">100.0%</div></td><td><div class="compliance-cell compliance-high">100.0%</div></td><td>1.56</td><td>3603.72</td></tr><tr><td>HeterogeneousMix.md</td><td><span class='testcase-status pass'>✓ PASS</span></td><td><div class="compliance-cell compliance-high">100.0%</div></td><td><div class="compliance-cell compliance-high">100.0%</div></td><td>-</td><td>-</td><td>0.00</td><td>1.74</td></tr><tr><td>Hour.md</td><td><span class='testcase-status pass'>✓ PASS</span></td><td><div class="compliance-cell compliance-high">100.0%</div></td><td><div class="compliance-cell compliance-high">100.0%</div></td><td><div class="compliance-cell compliance-high">100.0%</div></td><td><div class="compliance-cell compliance-high">100.0%</div></td><td>1.68</td><td>3603.72</td></tr><tr><td>Input.md</td><td><span class='testcase-status pass'>✓ PASS</span></td><td><div class="compliance-cell compliance-high">100.0%</div></td><td>-</td><td>-</td><td>-</td><td>0.01</td><td>3.48</td></tr><tr><td>MatchMeIfYouCan.md</td><td><span class='testcase-status pass'>✓ PASS</span></td><td><div class="compliance-cell compliance-med">99.4%</div></td><td><div class="compliance-cell compliance-high">100.0%</div></td><td>-</td><td>-</td><td>0.07</td><td>32.04</td></tr><tr><td>MemoryOverload.md</td><td><span class='testcase-status pass'>✓ PASS</span></td><td><div class="compliance-cell compliance-high">100.0%</div></td><td><div class="compliance-cell compliance-high">100.0%</div></td><td><div class="compliance-cell compliance-high">100.0%</div></td><td>-</td><td>0.00</td><td>1.26</td></tr><tr><td>Migrations.md</td><td><span class='testcase-status fail'>✗ FAIL</span></td><td><div class="compliance-cell compliance-low">93.7%</div></td><td><div class="compliance-cell compliance-high">100.0%</div></td><td>-</td><td>-</td><td>0.00</td><td>1.08</td></tr><tr><td>NiceAndSmooth.md</td><td><span class='testcase-status pass'>✓ PASS</span></td><td>-</td><td><div class="compliance-cell compliance-high">100.0%</div></td><td>-</td><td>-</td><td>0.01</td><td>16.32</td></tr><tr><td>SmallBursts.md</td><td><span class='testcase-status fail'>✗ FAIL</span></td><td>-</td><td><div class="compliance-cell compliance-low">35.0%</div></td><td><div class="compliance-cell compliance-high">100.0%</div></td><td>-</td><td>0.00</td><td>2.10</td></tr><tr><td>SpikeyMean.md</td><td><span class='testcase-status pass'>✓ PASS</span></td><td><div class="compliance-cell compliance-high">100.0%</div></td><td><div class="compliance-cell compliance-high">98.8%</div></td><td>-</td><td>-</td><td>0.02</td><td>28.86</td></tr><tr><td>SpikeyNefarious.md</td><td><span class='testcase-status pass'>✓ PASS</span></td><td><div class="compliance-cell compliance-high">100.0%</div></td><td><div class="compliance-cell compliance-high">100.0%</div></td><td>-</td><td>-</td><td>0.01</td><td>16.32</td></tr><tr><td>Starvation.md</td><td><span class='testcase-status pass'>✓ PASS</span></td><td><div class="compliance-cell compliance-high">100.0%</div></td><td><div class="compliance-cell compliance-high">100.0%</div></td><td><div class="compliance-cell compliance-high">100.0%</div></td><td>-</td><td>0.00</td><td>1.14</td></tr><tr><td>TallShort.md</td><td><span class='testcase-status fail'>✗ FAIL</span></td><td><div class="compliance-cell compliance-low">4.1%</div></td><td><div class="compliance-cell compliance-high">100.0%</div></td><td>-</td><td>-</td><td>0.04</td><td>36.90</td></tr></table>
+        <div class="summary">
+            <h2>Summary</h2>
+            <p class="fail">
+                Test Status: 13/17 testcases passed
+            </p>
+            <p>Total testcases: 17</p>
+            <p>Passed testcases: 13</p>
+            <p>Failed testcases: 4</p>
+            <p class="fail">Failed tests: BurstCycle.md, Migrations.md, SmallBursts.md, TallShort.md</p>
+        </div>
+    
+        <div class="test-case">
+            <div class="test-header">
+                <h2>BigSmall.md</h2>
+            </div>
+            <table class="sla-table">
+                <tr>
+                    <th>SLA Level</th>
+                    <th>Compliance</th>
+                    <th>Required</th>
+                    <th>Violations</th>
+                    <th>Status</th>
+                </tr>
+                
+                <tr class="pass">
+                    <td>SLA0</td>
+                    <td>100.00%</td>
+                    <td>95.0%</td>
+                    <td>0/4006</td>
+                    <td>✓ PASS</td>
+                </tr>
+            
+                <tr class="pass">
+                    <td>SLA1</td>
+                    <td>100.00%</td>
+                    <td>90.0%</td>
+                    <td>0/82</td>
+                    <td>✓ PASS</td>
+                </tr>
+            
+            </table>
+            <div class="metrics">
+                <div class="metric">
+                    <strong>Total Energy:</strong> 0.03 KW-Hour
+                </div>
+                <div class="metric">
+                    <strong>Runtime:</strong> 28.62 seconds
+                </div>
+            </div>
+        </div>
+    
+
+        <div class="test-case">
+            <div class="test-header">
+                <h2>BurstCycle.md</h2>
+            </div>
+            <table class="sla-table">
+                <tr>
+                    <th>SLA Level</th>
+                    <th>Compliance</th>
+                    <th>Required</th>
+                    <th>Violations</th>
+                    <th>Status</th>
+                </tr>
+                
+                <tr class="fail">
+                    <td>SLA0</td>
+                    <td>62.47%</td>
+                    <td>95.0%</td>
+                    <td>143/381</td>
+                    <td>✗ FAIL</td>
+                </tr>
+            
+                <tr class="pass">
+                    <td>SLA1</td>
+                    <td>100.00%</td>
+                    <td>90.0%</td>
+                    <td>0/35</td>
+                    <td>✓ PASS</td>
+                </tr>
+            
+            </table>
+            <div class="metrics">
+                <div class="metric">
+                    <strong>Total Energy:</strong> 0.00 KW-Hour
+                </div>
+                <div class="metric">
+                    <strong>Runtime:</strong> 1.68 seconds
+                </div>
+            </div>
+        </div>
+    
+
+        <div class="test-case">
+            <div class="test-header">
+                <h2>Day.md</h2>
+            </div>
+            <table class="sla-table">
+                <tr>
+                    <th>SLA Level</th>
+                    <th>Compliance</th>
+                    <th>Required</th>
+                    <th>Violations</th>
+                    <th>Status</th>
+                </tr>
+                
+                <tr class="pass">
+                    <td>SLA2</td>
+                    <td>99.91%</td>
+                    <td>80.0%</td>
+                    <td>416/481258</td>
+                    <td>✓ PASS</td>
+                </tr>
+            
+            </table>
+            <div class="metrics">
+                <div class="metric">
+                    <strong>Total Energy:</strong> 1.59 KW-Hour
+                </div>
+                <div class="metric">
+                    <strong>Runtime:</strong> 86401.10 seconds
+                </div>
+            </div>
+        </div>
+    
+
+        <div class="test-case">
+            <div class="test-header">
+                <h2>FinalInput.md</h2>
+            </div>
+            <table class="sla-table">
+                <tr>
+                    <th>SLA Level</th>
+                    <th>Compliance</th>
+                    <th>Required</th>
+                    <th>Violations</th>
+                    <th>Status</th>
+                </tr>
+                
+                <tr class="pass">
+                    <td>SLA0</td>
+                    <td>100.00%</td>
+                    <td>95.0%</td>
+                    <td>0/117</td>
+                    <td>✓ PASS</td>
+                </tr>
+            
+                <tr class="pass">
+                    <td>SLA1</td>
+                    <td>100.00%</td>
+                    <td>90.0%</td>
+                    <td>0/56282</td>
+                    <td>✓ PASS</td>
+                </tr>
+            
+                <tr class="pass">
+                    <td>SLA2</td>
+                    <td>100.00%</td>
+                    <td>80.0%</td>
+                    <td>0/2031</td>
+                    <td>✓ PASS</td>
+                </tr>
+            
+                <tr class="pass">
+                    <td>SLA3</td>
+                    <td>100.00%</td>
+                    <td>0.0%</td>
+                    <td>0/2021</td>
+                    <td>✓ PASS</td>
+                </tr>
+            
+            </table>
+            <div class="metrics">
+                <div class="metric">
+                    <strong>Total Energy:</strong> 0.65 KW-Hour
+                </div>
+                <div class="metric">
+                    <strong>Runtime:</strong> 301.32 seconds
+                </div>
+            </div>
+        </div>
+    
+
+        <div class="test-case">
+            <div class="test-header">
+                <h2>GentlerHour.md</h2>
+            </div>
+            <table class="sla-table">
+                <tr>
+                    <th>SLA Level</th>
+                    <th>Compliance</th>
+                    <th>Required</th>
+                    <th>Violations</th>
+                    <th>Status</th>
+                </tr>
+                
+                <tr class="pass">
+                    <td>SLA0</td>
+                    <td>100.00%</td>
+                    <td>95.0%</td>
+                    <td>0/630</td>
+                    <td>✓ PASS</td>
+                </tr>
+            
+                <tr class="pass">
+                    <td>SLA1</td>
+                    <td>100.00%</td>
+                    <td>90.0%</td>
+                    <td>0/23658</td>
+                    <td>✓ PASS</td>
+                </tr>
+            
+                <tr class="pass">
+                    <td>SLA2</td>
+                    <td>100.00%</td>
+                    <td>80.0%</td>
+                    <td>1/22208</td>
+                    <td>✓ PASS</td>
+                </tr>
+            
+                <tr class="pass">
+                    <td>SLA3</td>
+                    <td>100.00%</td>
+                    <td>0.0%</td>
+                    <td>0/54</td>
+                    <td>✓ PASS</td>
+                </tr>
+            
+            </table>
+            <div class="metrics">
+                <div class="metric">
+                    <strong>Total Energy:</strong> 1.56 KW-Hour
+                </div>
+                <div class="metric">
+                    <strong>Runtime:</strong> 3603.72 seconds
+                </div>
+            </div>
+        </div>
+    
+
+        <div class="test-case">
+            <div class="test-header">
+                <h2>HeterogeneousMix.md</h2>
+            </div>
+            <table class="sla-table">
+                <tr>
+                    <th>SLA Level</th>
+                    <th>Compliance</th>
+                    <th>Required</th>
+                    <th>Violations</th>
+                    <th>Status</th>
+                </tr>
+                
+                <tr class="pass">
+                    <td>SLA0</td>
+                    <td>100.00%</td>
+                    <td>95.0%</td>
+                    <td>0/273</td>
+                    <td>✓ PASS</td>
+                </tr>
+            
+                <tr class="pass">
+                    <td>SLA1</td>
+                    <td>100.00%</td>
+                    <td>90.0%</td>
+                    <td>0/125</td>
+                    <td>✓ PASS</td>
+                </tr>
+            
+            </table>
+            <div class="metrics">
+                <div class="metric">
+                    <strong>Total Energy:</strong> 0.00 KW-Hour
+                </div>
+                <div class="metric">
+                    <strong>Runtime:</strong> 1.74 seconds
+                </div>
+            </div>
+        </div>
+    
+
+        <div class="test-case">
+            <div class="test-header">
+                <h2>Hour.md</h2>
+            </div>
+            <table class="sla-table">
+                <tr>
+                    <th>SLA Level</th>
+                    <th>Compliance</th>
+                    <th>Required</th>
+                    <th>Violations</th>
+                    <th>Status</th>
+                </tr>
+                
+                <tr class="pass">
+                    <td>SLA0</td>
+                    <td>100.00%</td>
+                    <td>95.0%</td>
+                    <td>0/630</td>
+                    <td>✓ PASS</td>
+                </tr>
+            
+                <tr class="pass">
+                    <td>SLA1</td>
+                    <td>100.00%</td>
+                    <td>90.0%</td>
+                    <td>0/233695</td>
+                    <td>✓ PASS</td>
+                </tr>
+            
+                <tr class="pass">
+                    <td>SLA2</td>
+                    <td>100.00%</td>
+                    <td>80.0%</td>
+                    <td>1/22208</td>
+                    <td>✓ PASS</td>
+                </tr>
+            
+                <tr class="pass">
+                    <td>SLA3</td>
+                    <td>100.00%</td>
+                    <td>0.0%</td>
+                    <td>0/54</td>
+                    <td>✓ PASS</td>
+                </tr>
+            
+            </table>
+            <div class="metrics">
+                <div class="metric">
+                    <strong>Total Energy:</strong> 1.68 KW-Hour
+                </div>
+                <div class="metric">
+                    <strong>Runtime:</strong> 3603.72 seconds
+                </div>
+            </div>
+        </div>
+    
+
+        <div class="test-case">
+            <div class="test-header">
+                <h2>Input.md</h2>
+            </div>
+            <table class="sla-table">
+                <tr>
+                    <th>SLA Level</th>
+                    <th>Compliance</th>
+                    <th>Required</th>
+                    <th>Violations</th>
+                    <th>Status</th>
+                </tr>
+                
+                <tr class="pass">
+                    <td>SLA0</td>
+                    <td>100.00%</td>
+                    <td>95.0%</td>
+                    <td>0/128</td>
+                    <td>✓ PASS</td>
+                </tr>
+            
+            </table>
+            <div class="metrics">
+                <div class="metric">
+                    <strong>Total Energy:</strong> 0.01 KW-Hour
+                </div>
+                <div class="metric">
+                    <strong>Runtime:</strong> 3.48 seconds
+                </div>
+            </div>
+        </div>
+    
+
+        <div class="test-case">
+            <div class="test-header">
+                <h2>MatchMeIfYouCan.md</h2>
+            </div>
+            <table class="sla-table">
+                <tr>
+                    <th>SLA Level</th>
+                    <th>Compliance</th>
+                    <th>Required</th>
+                    <th>Violations</th>
+                    <th>Status</th>
+                </tr>
+                
+                <tr class="pass">
+                    <td>SLA0</td>
+                    <td>99.38%</td>
+                    <td>95.0%</td>
+                    <td>25/4006</td>
+                    <td>✓ PASS</td>
+                </tr>
+            
+                <tr class="pass">
+                    <td>SLA1</td>
+                    <td>100.00%</td>
+                    <td>90.0%</td>
+                    <td>0/82</td>
+                    <td>✓ PASS</td>
+                </tr>
+            
+            </table>
+            <div class="metrics">
+                <div class="metric">
+                    <strong>Total Energy:</strong> 0.07 KW-Hour
+                </div>
+                <div class="metric">
+                    <strong>Runtime:</strong> 32.04 seconds
+                </div>
+            </div>
+        </div>
+    
+
+        <div class="test-case">
+            <div class="test-header">
+                <h2>MemoryOverload.md</h2>
+            </div>
+            <table class="sla-table">
+                <tr>
+                    <th>SLA Level</th>
+                    <th>Compliance</th>
+                    <th>Required</th>
+                    <th>Violations</th>
+                    <th>Status</th>
+                </tr>
+                
+                <tr class="pass">
+                    <td>SLA0</td>
+                    <td>100.00%</td>
+                    <td>95.0%</td>
+                    <td>0/90</td>
+                    <td>✓ PASS</td>
+                </tr>
+            
+                <tr class="pass">
+                    <td>SLA1</td>
+                    <td>100.00%</td>
+                    <td>90.0%</td>
+                    <td>0/214</td>
+                    <td>✓ PASS</td>
+                </tr>
+            
+                <tr class="pass">
+                    <td>SLA2</td>
+                    <td>100.00%</td>
+                    <td>80.0%</td>
+                    <td>0/567</td>
+                    <td>✓ PASS</td>
+                </tr>
+            
+            </table>
+            <div class="metrics">
+                <div class="metric">
+                    <strong>Total Energy:</strong> 0.00 KW-Hour
+                </div>
+                <div class="metric">
+                    <strong>Runtime:</strong> 1.26 seconds
+                </div>
+            </div>
+        </div>
+    
+
+        <div class="test-case">
+            <div class="test-header">
+                <h2>Migrations.md</h2>
+            </div>
+            <table class="sla-table">
+                <tr>
+                    <th>SLA Level</th>
+                    <th>Compliance</th>
+                    <th>Required</th>
+                    <th>Violations</th>
+                    <th>Status</th>
+                </tr>
+                
+                <tr class="fail">
+                    <td>SLA0</td>
+                    <td>93.72%</td>
+                    <td>95.0%</td>
+                    <td>15/239</td>
+                    <td>✗ FAIL</td>
+                </tr>
+            
+                <tr class="pass">
+                    <td>SLA1</td>
+                    <td>100.00%</td>
+                    <td>90.0%</td>
+                    <td>0/108</td>
+                    <td>✓ PASS</td>
+                </tr>
+            
+            </table>
+            <div class="metrics">
+                <div class="metric">
+                    <strong>Total Energy:</strong> 0.00 KW-Hour
+                </div>
+                <div class="metric">
+                    <strong>Runtime:</strong> 1.08 seconds
+                </div>
+            </div>
+        </div>
+    
+
+        <div class="test-case">
+            <div class="test-header">
+                <h2>NiceAndSmooth.md</h2>
+            </div>
+            <table class="sla-table">
+                <tr>
+                    <th>SLA Level</th>
+                    <th>Compliance</th>
+                    <th>Required</th>
+                    <th>Violations</th>
+                    <th>Status</th>
+                </tr>
+                
+                <tr class="pass">
+                    <td>SLA1</td>
+                    <td>100.00%</td>
+                    <td>90.0%</td>
+                    <td>0/82</td>
+                    <td>✓ PASS</td>
+                </tr>
+            
+            </table>
+            <div class="metrics">
+                <div class="metric">
+                    <strong>Total Energy:</strong> 0.01 KW-Hour
+                </div>
+                <div class="metric">
+                    <strong>Runtime:</strong> 16.32 seconds
+                </div>
+            </div>
+        </div>
+    
+
+        <div class="test-case">
+            <div class="test-header">
+                <h2>SmallBursts.md</h2>
+            </div>
+            <table class="sla-table">
+                <tr>
+                    <th>SLA Level</th>
+                    <th>Compliance</th>
+                    <th>Required</th>
+                    <th>Violations</th>
+                    <th>Status</th>
+                </tr>
+                
+                <tr class="fail">
+                    <td>SLA1</td>
+                    <td>35.00%</td>
+                    <td>90.0%</td>
+                    <td>65/100</td>
+                    <td>✗ FAIL</td>
+                </tr>
+            
+                <tr class="pass">
+                    <td>SLA2</td>
+                    <td>100.00%</td>
+                    <td>80.0%</td>
+                    <td>0/19</td>
+                    <td>✓ PASS</td>
+                </tr>
+            
+            </table>
+            <div class="metrics">
+                <div class="metric">
+                    <strong>Total Energy:</strong> 0.00 KW-Hour
+                </div>
+                <div class="metric">
+                    <strong>Runtime:</strong> 2.10 seconds
+                </div>
+            </div>
+        </div>
+    
+
+        <div class="test-case">
+            <div class="test-header">
+                <h2>SpikeyMean.md</h2>
+            </div>
+            <table class="sla-table">
+                <tr>
+                    <th>SLA Level</th>
+                    <th>Compliance</th>
+                    <th>Required</th>
+                    <th>Violations</th>
+                    <th>Status</th>
+                </tr>
+                
+                <tr class="pass">
+                    <td>SLA0</td>
+                    <td>100.00%</td>
+                    <td>95.0%</td>
+                    <td>0/4006</td>
+                    <td>✓ PASS</td>
+                </tr>
+            
+                <tr class="pass">
+                    <td>SLA1</td>
+                    <td>98.78%</td>
+                    <td>90.0%</td>
+                    <td>1/82</td>
+                    <td>✓ PASS</td>
+                </tr>
+            
+            </table>
+            <div class="metrics">
+                <div class="metric">
+                    <strong>Total Energy:</strong> 0.02 KW-Hour
+                </div>
+                <div class="metric">
+                    <strong>Runtime:</strong> 28.86 seconds
+                </div>
+            </div>
+        </div>
+    
+
+        <div class="test-case">
+            <div class="test-header">
+                <h2>SpikeyNefarious.md</h2>
+            </div>
+            <table class="sla-table">
+                <tr>
+                    <th>SLA Level</th>
+                    <th>Compliance</th>
+                    <th>Required</th>
+                    <th>Violations</th>
+                    <th>Status</th>
+                </tr>
+                
+                <tr class="pass">
+                    <td>SLA0</td>
+                    <td>100.00%</td>
+                    <td>95.0%</td>
+                    <td>0/630</td>
+                    <td>✓ PASS</td>
+                </tr>
+            
+                <tr class="pass">
+                    <td>SLA1</td>
+                    <td>100.00%</td>
+                    <td>90.0%</td>
+                    <td>0/82</td>
+                    <td>✓ PASS</td>
+                </tr>
+            
+            </table>
+            <div class="metrics">
+                <div class="metric">
+                    <strong>Total Energy:</strong> 0.01 KW-Hour
+                </div>
+                <div class="metric">
+                    <strong>Runtime:</strong> 16.32 seconds
+                </div>
+            </div>
+        </div>
+    
+
+        <div class="test-case">
+            <div class="test-header">
+                <h2>Starvation.md</h2>
+            </div>
+            <table class="sla-table">
+                <tr>
+                    <th>SLA Level</th>
+                    <th>Compliance</th>
+                    <th>Required</th>
+                    <th>Violations</th>
+                    <th>Status</th>
+                </tr>
+                
+                <tr class="pass">
+                    <td>SLA0</td>
+                    <td>100.00%</td>
+                    <td>95.0%</td>
+                    <td>0/497</td>
+                    <td>✓ PASS</td>
+                </tr>
+            
+                <tr class="pass">
+                    <td>SLA1</td>
+                    <td>100.00%</td>
+                    <td>90.0%</td>
+                    <td>0/237</td>
+                    <td>✓ PASS</td>
+                </tr>
+            
+                <tr class="pass">
+                    <td>SLA2</td>
+                    <td>100.00%</td>
+                    <td>80.0%</td>
+                    <td>0/85</td>
+                    <td>✓ PASS</td>
+                </tr>
+            
+            </table>
+            <div class="metrics">
+                <div class="metric">
+                    <strong>Total Energy:</strong> 0.00 KW-Hour
+                </div>
+                <div class="metric">
+                    <strong>Runtime:</strong> 1.14 seconds
+                </div>
+            </div>
+        </div>
+    
+
+        <div class="test-case">
+            <div class="test-header">
+                <h2>TallShort.md</h2>
+            </div>
+            <table class="sla-table">
+                <tr>
+                    <th>SLA Level</th>
+                    <th>Compliance</th>
+                    <th>Required</th>
+                    <th>Violations</th>
+                    <th>Status</th>
+                </tr>
+                
+                <tr class="fail">
+                    <td>SLA0</td>
+                    <td>4.14%</td>
+                    <td>95.0%</td>
+                    <td>3840/4006</td>
+                    <td>✗ FAIL</td>
+                </tr>
+            
+                <tr class="pass">
+                    <td>SLA1</td>
+                    <td>100.00%</td>
+                    <td>90.0%</td>
+                    <td>0/82</td>
+                    <td>✓ PASS</td>
+                </tr>
+            
+            </table>
+            <div class="metrics">
+                <div class="metric">
+                    <strong>Total Energy:</strong> 0.04 KW-Hour
+                </div>
+                <div class="metric">
+                    <strong>Runtime:</strong> 36.90 seconds
+                </div>
+            </div>
+        </div>
+    
+    </body>
+    </html>
+    
