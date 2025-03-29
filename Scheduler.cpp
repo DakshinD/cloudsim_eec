@@ -54,6 +54,7 @@ const double num_standby_machines_init = .3;
 const double num_off_machines_init = .2;
 map<CPUType_t, unsigned> tasks_per_cpu_type;
 map<CPUType_t, double> avg_memory_per_task_of_cpu_type;
+const MachineState_t STANDBY_STATE = S1;
 
 // Reporting Data Structures
 int total_sla[NUM_SLAS] = {0};
@@ -227,14 +228,9 @@ void Scheduler::Init() {
         unsigned cpu_total = cpu_machines.size(); 
         
         // Calculate number of machines for each state using e-eco ratios
-        unsigned num_on = cpu_total * num_on_machines_init;        // 30%
-        unsigned num_standby = cpu_total * num_standby_machines_init;  // 30%
-        unsigned num_off = cpu_total * num_off_machines_init;      // 40%
-
-        SimOutput("Scheduler::Init(): CPU Type " + to_string(cpu_type) + 
-                 " distribution - ON: " + to_string(num_on) + 
-                 ", STANDBY: " + to_string(num_standby) + 
-                 ", OFF: " + to_string(num_off), 1);
+        unsigned num_on = cpu_total * num_on_machines_init;        
+        unsigned num_standby = cpu_total * num_standby_machines_init; 
+        unsigned num_off = cpu_total * num_off_machines_init;      
 
         // Distribute machines across states
         unsigned machine_index = 0;
@@ -245,17 +241,13 @@ void Scheduler::Init() {
             machine_states[machine_id] = {{}, ON};
             Machine_SetState(machine_id, S0);
             total_on_machines++;
-            SimOutput("Scheduler::Init(): Machine " + to_string(machine_id) + 
-                     " (CPU " + to_string(cpu_type) + ") set to ON", 1);
         }
 
         // Set STANDBY machines
         for(unsigned i = 0; i < num_standby; i++) {
             MachineId_t machine_id = cpu_machines[machine_index++];
             machine_states[machine_id] = {{}, STANDBY};
-            Machine_SetState(machine_id, S1);
-            SimOutput("Scheduler::Init(): Machine " + to_string(machine_id) + 
-                     " (CPU " + to_string(cpu_type) + ") set to STANDBY", 1);
+            Machine_SetState(machine_id, STANDBY_STATE);
         }
         
         // Set remaining machines to OFF
@@ -263,8 +255,6 @@ void Scheduler::Init() {
             MachineId_t machine_id = cpu_machines[machine_index++];
             machine_states[machine_id] = {{}, OFF};
             Machine_SetState(machine_id, S5);
-            SimOutput("Scheduler::Init(): Machine " + to_string(machine_id) + 
-                     " (CPU " + to_string(cpu_type) + ") set to OFF", 1);
         }
     }  
 }
@@ -324,9 +314,7 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
 
     // calculate the average memory per task of this cpu type
     tasks_per_cpu_type[cpu_type]++;
-    avg_memory_per_task_of_cpu_type[cpu_type] = 
-        (avg_memory_per_task_of_cpu_type[cpu_type] * (tasks_per_cpu_type[cpu_type] - 1) + task_memory) 
-        / tasks_per_cpu_type[cpu_type];
+    avg_memory_per_task_of_cpu_type[cpu_type] = (avg_memory_per_task_of_cpu_type[cpu_type] * (tasks_per_cpu_type[cpu_type] - 1) + task_memory) / tasks_per_cpu_type[cpu_type];
 
     unsigned num_cores_available = 0;
     unsigned memory_available = 0;
@@ -346,7 +334,6 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
                 Machine_SetState(machine_id, S0);
                 machine_states[machine_id].state = TURNING_ON;
                 break;
-                // pending_attachments[machine_id].push_back(task_id);
             }
         }
 
@@ -361,14 +348,13 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
         }
 
         standby_ratio = standby_ratio / total_machines_of_cpu_type;
-        if (standby_ratio < 0.3) {
+        if (standby_ratio < num_standby_machines_init) {
             // We need to turn on a machine from off if there are remaining off machines
             for (const auto& [machine_id, m_state] : machine_states) {
                 if (m_state.state == OFF && cpu_type == Machine_GetCPUType(machine_id)) {
-                    Machine_SetState(machine_id, S1);
+                    Machine_SetState(machine_id, STANDBY_STATE);
                     machine_states[machine_id].state = TURNING_OFF;
                     break;
-                    // pending_attachments[machine_id].push_back(task_id);
                 }
             }
         }
@@ -532,87 +518,84 @@ void Scheduler::TaskComplete(Time_t now, TaskId_t task_id) {
             }
 
         }
-        // // If machine is empty after migrations, shut it down
-        // MachineInfo_t m_info = Machine_GetInfo(source_id);
-        // if (all_vms_migrated && m_info.active_vms == 0 && 
-        //     total_on_machines > int(MIN_MACHINE_PERCENT_IN_STATE * total_machines) && !Machine_IsMigrationTarget(source_id)) {
+        // If machine is empty after migrations, shut it down
+        MachineInfo_t m_info = Machine_GetInfo(source_id);
+        if (all_vms_migrated && m_info.active_vms == 0 && 
+            total_on_machines > int(MIN_MACHINE_PERCENT_IN_STATE * total_machines) && !Machine_IsMigrationTarget(source_id)) {
             
-        //     Machine_SetState(source_id, SLEEP_STATE);
-        //     machine_states[source_id].state = TURNING_OFF;
-        //     total_on_machines--;
-        //     SimOutput("TaskComplete(): Machine " + to_string(source_id) + 
-        //              " is empty after migrations and is being turned off", 1);
-        // }
+            Machine_SetState(source_id, SLEEP_STATE);
+            machine_states[source_id].state = TURNING_OFF;
+            total_on_machines--;
+            SimOutput("TaskComplete(): Machine " + to_string(source_id) + 
+                     " is empty after migrations and is being turned off", 1);
+        }
     }
 
-    // Check if we need to turn a machine from standby to off or on to standby
-    MachineId_t m_id = vm_info.machine_id;
-    CPUType_t cpu_type = Machine_GetCPUType(m_id);
+    // // Check if we need to turn a machine from standby to off or on to standby
+    // MachineId_t m_id = vm_info.machine_id;
+    // CPUType_t cpu_type = Machine_GetCPUType(m_id);
 
-    if (!Machine_IsMigrationTarget(m_id)) {
-        // Count machines and calculate available resources for this CPU type
-        unsigned total_cpu_machines = 0;
-        unsigned current_on = 0;
-        unsigned current_standby = 0;
-        unsigned total_available_cores = 0;
-        unsigned total_available_memory = 0;
+    // if (!Machine_IsMigrationTarget(m_id)) {
+    //     // Count machines and calculate available resources for this CPU type
+    //     unsigned total_cpu_machines = 0;
+    //     unsigned current_on = 0;
+    //     unsigned current_standby = 0;
+    //     unsigned total_available_cores = 0;
+    //     unsigned total_available_memory = 0;
         
-        for (const auto& [machine_id, m_state] : machine_states) {
-            if (Machine_GetCPUType(machine_id) == cpu_type) {
-                total_cpu_machines++;
-                MachineInfo_t m_info = Machine_GetInfo(machine_id);
+    //     for (const auto& [machine_id, m_state] : machine_states) {
+    //         if (Machine_GetCPUType(machine_id) == cpu_type) {
+    //             total_cpu_machines++;
+    //             MachineInfo_t m_info = Machine_GetInfo(machine_id);
                 
-                if (m_state.state == ON) {
-                    current_on++;
-                    // Only count resources from machines that aren't the one completing task
-                    if (machine_id != m_id) {
-                        total_available_cores += (m_info.num_cpus - m_info.active_vms);
-                        total_available_memory += (m_info.memory_size - m_info.memory_used);
-                    }
-                } else if (m_state.state == STANDBY) {
-                    current_standby++;
-                }
-            }
-        }
+    //             if (m_state.state == ON) {
+    //                 current_on++;
+    //                 total_available_cores += (m_info.num_cpus - m_info.active_vms);
+    //                 total_available_memory += (m_info.memory_size - m_info.memory_used);
+    //             } else if (m_state.state == STANDBY) {
+    //                 current_standby++;
+    //             }
+    //         }
+    //     }
 
-        if (Machine_GetInfo(m_id).active_vms == 0) {
-            // Check if we can turn this ON machine to STANDBY
-            // Ensure we maintain minimum resources after turning this machine off
-            if (total_available_cores >= 2 && 
-                total_available_memory > avg_memory_per_task_of_cpu_type[cpu_type]) {
+    //     if (Machine_GetInfo(m_id).active_vms == 0) {
+    //         // Check if we can turn this ON machine to STANDBY
+    //         // Ensure we maintain minimum resources after turning this machine off
+    //         if (total_available_cores >= 2 && 
+    //             total_available_memory > avg_memory_per_task_of_cpu_type[cpu_type]) {
                 
-                // Turn this machine to STANDBY
-                Machine_SetState(m_id, S3);
-                machine_states[m_id].state = TURNING_OFF;
-                current_on--;
-                total_on_machines--;
-                current_standby++;
+    //             // Turn this machine to STANDBY
+    //             Machine_SetState(m_id, STANDBY_STATE);
+    //             machine_states[m_id].state = TURNING_OFF;
+    //             current_on--;
+    //             total_on_machines--;
+    //             current_standby++;
                 
-                SimOutput("TaskComplete(): Machine " + to_string(m_id) + 
-                         " transitioning to STANDBY. Available cores: " + 
-                         to_string(total_available_cores) + ", memory: " + 
-                         to_string(total_available_memory), 1);
+    //             SimOutput("TaskComplete(): Machine " + to_string(m_id) + 
+    //                      " transitioning to STANDBY. Available cores: " + 
+    //                      to_string(total_available_cores) + ", memory: " + 
+    //                      to_string(total_available_memory), 1);
 
-                // Check if we have too many STANDBY machines
-                unsigned max_standby = total_cpu_machines * num_standby_machines_init;
-                if (current_standby > max_standby) {
-                    // Find a STANDBY machine to turn OFF
-                    for (auto& [machine_id, m_state] : machine_states) {
-                        if (m_state.state == STANDBY && 
-                            Machine_GetCPUType(machine_id) == cpu_type &&
-                            machine_id != m_id) {  // Don't turn off the machine we just transitioned
+    //             // Check if we have too many STANDBY machines
+    //             unsigned max_standby = total_cpu_machines * num_standby_machines_init;
+    //             if (current_standby > max_standby) {
+    //                 // Find a STANDBY machine to turn OFF
+    //                 for (auto& [machine_id, m_state] : machine_states) {
+    //                     if (m_state.state == STANDBY && 
+    //                         Machine_GetCPUType(machine_id) == cpu_type &&
+    //                         machine_id != m_id) {  // Don't turn off the machine we just transitioned
                             
-                            Machine_SetState(machine_id, S5);
-                            m_state.state = TURNING_OFF;
-                            SimOutput("TaskComplete(): Excess STANDBY machine " + 
-                                     to_string(machine_id) + " turning OFF", 1);
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-    }
+    //                         Machine_SetState(machine_id, S5);
+    //                         m_state.state = TURNING_OFF;
+    //                         SimOutput("TaskComplete(): Excess STANDBY machine " + 
+    //                                  to_string(machine_id) + " turning OFF", 1);
+    //                         break;
+    //                     }
+    //                 }
+    //             }
+    //         }
+    //     }
+    // }
 }
 
 
