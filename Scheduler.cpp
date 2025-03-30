@@ -218,6 +218,7 @@ void Debug() {
     SimOutput(res, 0);
 }
 
+// Debugging method written by by Claude 3.5 Sonnet
 void DisplayProgressBar() {
     int barWidth = 70;
     float progress = (float)completed_tasks / total_tasks;
@@ -316,8 +317,9 @@ bool IsSystemOverloaded() {
     unsigned total_tasks = 0;
     unsigned total_vms = 0;
 
+    // for loop written by by Claude 3.5 Sonnet
     for (const auto& [machine_id, m_state] : machine_states) {
-        if (m_state.state != ON) continue; // Only consider machines that are ON
+        if (m_state.state != ON) continue; 
 
         MachineInfo_t machine_info = Machine_GetInfo(machine_id);
         total_cores += machine_info.num_cpus;
@@ -330,7 +332,7 @@ bool IsSystemOverloaded() {
         }
     }
 
-    // Define thresholds for overload
+    // thresholds for overload
     double core_utilization = (double)used_cores / total_cores;
     double avg_tasks_per_vm = total_vms > 0 ? (double)total_tasks / total_vms : 0.0;
     
@@ -338,7 +340,7 @@ bool IsSystemOverloaded() {
     unsigned machines_off = total_machines - total_on_machines;
     double machine_off_ratio = (double)machines_off / total_machines;
 
-    // System is considered overloaded if core utilization exceeds 90% or average tasks per VM exceed 10
+    // sys is considered overloaded if core utilization exceeds 90% or average tasks per VM exceed 10
     if (machine_off_ratio < 0.5 && (core_utilization > 0.9 || avg_tasks_per_vm > 10.0)) {
         SimOutput("IsSystemOverloaded(): System is overloaded. Core utilization: " + to_string(core_utilization * 100) + "%, Avg tasks per VM: " + to_string(avg_tasks_per_vm), 1);
         return true;
@@ -355,7 +357,7 @@ void SetMachinePState(MachineId_t machine_id) {
     MachineInfo_t machine_info = Machine_GetInfo(machine_id);
     if (machine_info.s_state != S0) return;
 
-    // Calculate load factors
+    // calculate load factors
     double core_utilization = (double)machine_info.active_vms / machine_info.num_cpus;
     if (core_utilization == 0.0) {
         Machine_SetCorePerformance(machine_id, -1, P3);
@@ -363,90 +365,6 @@ void SetMachinePState(MachineId_t machine_id) {
         Machine_SetCorePerformance(machine_id, -1, P0);
     }
     SimOutput("SetMachinePState(): Machine " + to_string(machine_id) + " set to P-state " + to_string(Machine_GetInfo(machine_id).p_state), 1);
-}
-
-/*
-Horrible on time, SLA, and energy due to migrating only being worth if it is a long process, else the extra time taken is useless
-- For futher optimization, try load balancing tasks/VMs to consolidate light machines
-    a. To start, just sort by least vms, and migrate them to machines with open cores (sort descending machines below max cores)
-*/
-void LoadBalanceTasks() {
-    // Step 1: Identify heavily loaded VMs
-    vector<pair<VMId_t, size_t>> heavy_vms;
-    for (const auto& [machine_id, m_state] : machine_states) {
-        if (m_state.state != ON) continue; // Only consider machines that are ON
-        for (const auto& vm_id : m_state.vms) {
-            VMInfo_t vm_info = VM_GetInfo(vm_id);
-            if (vm_info.active_tasks.size() > 10) { // Threshold for heavily loaded VMs
-                heavy_vms.emplace_back(vm_id, vm_info.active_tasks.size());
-            }
-        }
-    }
-
-    // Sort heavily loaded VMs by the number of tasks (descending)
-    std::sort(heavy_vms.begin(), heavy_vms.end(),
-              [](const auto& a, const auto& b) { return a.second > b.second; });
-
-    // Step 2: Identify lightly loaded VMs
-    vector<pair<VMId_t, size_t>> light_vms;
-    for (const auto& [machine_id, m_state] : machine_states) {
-        if (m_state.state != ON) continue; // Only consider machines that are ON
-        for (const auto& vm_id : m_state.vms) {
-            VMInfo_t vm_info = VM_GetInfo(vm_id);
-            if (vm_info.active_tasks.size() < 5) { // Threshold for lightly loaded VMs
-                light_vms.emplace_back(vm_id, vm_info.active_tasks.size());
-            }
-        }
-    }
-
-    // Sort lightly loaded VMs by the number of tasks (ascending)
-    std::sort(light_vms.begin(), light_vms.end(),
-              [](const auto& a, const auto& b) { return a.second < b.second; });
-
-    // Step 3: Balance tasks between heavily and lightly loaded VMs
-    for (auto& [heavy_vm_id, heavy_task_count] : heavy_vms) {
-        VMInfo_t heavy_vm_info = VM_GetInfo(heavy_vm_id);
-        vector<TaskId_t> tasks_to_migrate(heavy_vm_info.active_tasks.begin(), heavy_vm_info.active_tasks.end());
-
-        for (auto& [light_vm_id, light_task_count] : light_vms) {
-            if (heavy_task_count <= light_task_count + 1) break; // Stop if tasks are balanced
-
-            VMInfo_t light_vm_info = VM_GetInfo(light_vm_id);
-
-            // Check compatibility and migrate tasks
-            for (auto task_id : tasks_to_migrate) {
-                TaskInfo_t task_info = GetTaskInfo(task_id);
-
-                // Check compatibility (e.g., VM type, CPU type, memory availability)
-                bool compatible_vm_type = light_vm_info.vm_type == RequiredVMType(task_id);
-                bool compatible_cpu_type = light_vm_info.cpu == RequiredCPUType(task_id);
-                MachineInfo_t m_info = Machine_GetInfo(light_vm_info.machine_id);
-                bool sufficient_memory = m_info.memory_size - m_info.memory_used >= GetTaskMemory(task_id);
-
-                if (!IsTaskCompleted(task_id) && compatible_vm_type && compatible_cpu_type && sufficient_memory) {
-                    // Migrate the task
-                    DebugVM(heavy_vm_id);
-                    VM_RemoveTask(heavy_vm_id, task_id);
-                    VM_AddTask(light_vm_id, task_id, task_info.priority);
-                    task_assignments[task_id] = light_vm_id;
-
-                    SimOutput("LoadBalanceTasks(): Migrated task " + to_string(task_id) +
-                              " from VM " + to_string(heavy_vm_id) +
-                              " to VM " + to_string(light_vm_id), 0);
-
-                    // Update task counts
-                    heavy_task_count--;
-                    light_task_count++;
-
-                    // Break if tasks are balanced
-                    if (heavy_task_count <= light_task_count + 1) break;
-                }
-            }
-
-            // Break if tasks are balanced
-            if (heavy_task_count <= light_task_count + 1) break;
-        }
-    }
 }
 
 /* New task methods */
@@ -850,10 +768,6 @@ void Scheduler::TaskComplete(Time_t now, TaskId_t task_id) {
     VMId_t vm_id = task_assignments[task_id];
     VMInfo_t vm_info = VM_GetInfo(vm_id);
     SimOutput("Scheduler::TaskComplete(): Task " + to_string(task_id) + " is complete at " + to_string(now) + " on vm " + to_string(vm_id), 1);
-    
-    // if (VM_GetInfo(vm_id).active_tasks.size() != 0) {
-    //     ThrowException("Somehow there are active tasks on a VM?????");
-    // }
 
     // PROGRESS
     completed_tasks++;
