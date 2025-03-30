@@ -1,0 +1,27 @@
+CloudSim Test Results - 2025-03-30 09:53:12
+
+Test Case           | Status   | SLA0     | SLA1     | SLA2     | SLA3     | Energy       | Runtime   
+-----------------------------------------------------------------------------------------------
+BigSmall.md         | FAIL     |   14.8%✗ |   39.0%✗ | -        | -        |         1.16 |    8579.04
+BurstCycle.md       | FAIL     |   88.5%✗ |   91.4%✓ | -        | -        |         0.02 |     181.08
+Day.md              | PASS     | -        | -        |  100.0%✓ | -        |        11.79 |   86400.70
+FinalInput.md       | PASS     |  100.0%✓ |  100.0%✓ |  100.0%✓ |  100.0%✓ |         0.57 |     300.72
+GentlerHour.md      | PASS     |  100.0%✓ |  100.0%✓ |  100.0%✓ |  100.0%✓ |         2.41 |    3603.48
+HeterogeneousMix.md | PASS     |  100.0%✓ |  100.0%✓ | -        | -        |         0.00 |       1.50
+Hour.md             | PASS     |  100.0%✓ |  100.0%✓ |  100.0%✓ |  100.0%✓ |         2.48 |    3603.48
+Input.md            | PASS     |  100.0%✓ | -        | -        | -        |         0.01 |       3.48
+MatchMeIfYouCan.md  | FAIL     |   94.8%✗ |   96.3%✓ | -        | -        |         0.16 |     308.52
+MemoryOverload.md   | PASS     |  100.0%✓ |  100.0%✓ |  100.0%✓ | -        |         0.00 |       1.26
+Migrations.md       | PASS     |  100.0%✓ |  100.0%✓ | -        | -        |         0.00 |       1.08
+NiceAndSmooth.md    | PASS     | -        |  100.0%✓ | -        | -        |         0.01 |      16.68
+SmallBursts.md      | PASS     | -        |  100.0%✓ |  100.0%✓ | -        |         0.00 |       2.10
+SpikeyMean.md       | FAIL     |   33.6%✗ |   47.6%✗ | -        | -        |         1.53 |    5986.22
+SpikeyNefarious.md  | PASS     |  100.0%✓ |  100.0%✓ | -        | -        |         0.01 |      16.56
+Starvation.md       | PASS     |  100.0%✓ |  100.0%✓ |  100.0%✓ | -        |         0.00 |       1.14
+TallShort.md        | FAIL     |    0.0%✗ |   41.5%✗ | -        | -        |         1.70 |   12628.20
+-----------------------------------------------------------------------------------------------
+
+Summary:
+Total testcases: 17
+Passed testcases: 12
+Failed testcases: 5
