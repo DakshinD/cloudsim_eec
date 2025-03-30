@@ -161,12 +161,35 @@ void LoadBalance() {
         }
         
         // Over
-        // if (machine_util > OVERUTIL_THRESHOLD) {
-        //     for (auto& vm_id : m_state.vms) {
-        //         MigrateHelper(vm_id, machine_id, GetBestMachine(VM_GetInfo(vm_id).active_tasks[0]));
-        //         break;
-        //     }
-        // }
+        if (machine_util > OVERUTIL_THRESHOLD) {
+            vector<pair<VMId_t, Priority_t>> vm_priorities;
+
+            // calculate utilizations for all VMs on machine
+            for (auto& vm_id : m_state.vms) {
+                VMInfo_t vm_info = VM_GetInfo(vm_id);
+                TaskId_t task_id = vm_info.active_tasks[0];
+                TaskInfo_t task_info = GetTaskInfo(task_id);
+                vm_priorities.emplace_back(vm_id, task_info.priority);
+            }
+
+            sort(vm_priorities.begin(), vm_priorities.end(), [](const auto& a, const auto& b) {
+                return a.second < b.second;
+            });
+
+            // Migrate VMs with lowest utilization first
+            for (auto& [vm_id, vm_util] : vm_priorities) {
+                VMInfo_t vm_info = VM_GetInfo(vm_id);
+                TaskId_t task_id = vm_info.active_tasks[0];
+
+                MachineId_t dest_machine = GetBestMachine(task_id);
+                if (dest_machine == machine_id || dest_machine == -1) continue;
+                
+                MigrateHelper(vm_id, machine_id, dest_machine);
+                machine_util = MachineUtilization(machine_id);
+
+                if (machine_util <= OVERUTIL_THRESHOLD) break;
+            }
+        }
     }
 }
 
