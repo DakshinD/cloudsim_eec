@@ -10,9 +10,12 @@
 #include <set>
 #include <algorithm>
 #include <cassert>
+#include <cmath>
 
 using std::map;
 using std::set;
+using std::max;
+using std::min;
 
 enum MachinePowerState {
     ON = 0,
@@ -250,7 +253,6 @@ void Scheduler::MigrationComplete(Time_t time, VMId_t vm_id) {
     }
 }
 
-
 void Scheduler::Init() {
     SimOutput("Scheduler::Init(): Total number of machines is " + to_string(Machine_GetTotal()), 3);
     SimOutput("Scheduler::Init(): Initializing scheduler", 1);
@@ -258,7 +260,7 @@ void Scheduler::Init() {
     total_machines = Machine_GetTotal();
     total_tasks = GetNumTasks();
 
-    // Group machines by CPU type first
+    // Group machines by CPU type
     map<CPUType_t, vector<MachineId_t>> machines_by_cpu;
     for(unsigned i = 0; i < total_machines; i++) {
         machines.push_back(MachineId_t(i));
@@ -266,16 +268,13 @@ void Scheduler::Init() {
         machines_by_cpu[cpu_type].push_back(i);
     }
 
-    // For each CPU type, distribute machines according to e-eco ratios
+    // Distribute machines according to e-eco ratios
     for(auto& [cpu_type, cpu_machines] : machines_by_cpu) {
         unsigned cpu_total = cpu_machines.size(); 
-        
-        // Calculate number of machines for each state using e-eco ratios
         unsigned num_on = cpu_total * num_on_machines_init;        
         unsigned num_standby = cpu_total * num_standby_machines_init; 
         unsigned num_off = cpu_total * num_off_machines_init;      
 
-        // Distribute machines across states
         unsigned machine_index = 0;
         
         // Set ON machines
@@ -411,24 +410,43 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
     CPUType_t cpu_type = RequiredCPUType(task_id);
     unsigned task_memory = GetTaskMemory(task_id);
 
-    // calculate the average memory per task of this cpu type
+    // calculate the average memory per task of this cpu type 
+    // average memory formula derived using Claude 3.5 Sonnet
     tasks_per_cpu_type[cpu_type]++;
-    avg_memory_per_task_of_cpu_type[cpu_type] = (avg_memory_per_task_of_cpu_type[cpu_type] * (tasks_per_cpu_type[cpu_type] - 1) + task_memory) / tasks_per_cpu_type[cpu_type];
+    avg_memory_per_task_of_cpu_type[cpu_type] = (avg_memory_per_task_of_cpu_type[cpu_type] * 
+                                                (tasks_per_cpu_type[cpu_type] - 1) + task_memory) / 
+                                                tasks_per_cpu_type[cpu_type];
 
+    unsigned total_cpu_machines = 0;
     unsigned num_cores_available = 0;
     unsigned memory_available = 0;
+    unsigned current_on = 0;
+    unsigned current_standby = 0;
 
     for (const auto& [machine_id, m_state] : machine_states) {
-        if ((m_state.state == ON || m_state.state == TURNING_ON) && cpu_type == Machine_GetCPUType(machine_id)) {
-            MachineInfo_t machine_info = Machine_GetInfo(machine_id);
-            num_cores_available += (machine_info.num_cpus - machine_info.active_vms);
-            memory_available += (machine_info.memory_size - machine_info.memory_used);
+        if (cpu_type == Machine_GetCPUType(machine_id)) {
+            total_cpu_machines++;
+            if ((m_state.state == ON || m_state.state == TURNING_ON)) {
+                current_on++;
+                MachineInfo_t machine_info = Machine_GetInfo(machine_id);
+                num_cores_available += (machine_info.num_cpus - machine_info.active_vms);
+                memory_available += (machine_info.memory_size - machine_info.memory_used);
+            } else if (m_state.state == STANDBY || m_state.state == TURNING_STANDBY) {
+                current_standby++;
+            }
         }
     }
 
-    if (num_cores_available <= 6 || memory_available <= (3 * avg_memory_per_task_of_cpu_type[cpu_type])) {
-        // We need to turn on a machine from standby
-        SimOutput("NewTask(): Need to turn on a machine from standby", 1);
+    // calculating dynamic thresholds, derived using Claude 3.5 Sonnet
+    unsigned min_cores_buffer = std::max(6u, static_cast<unsigned>(total_cpu_machines * 0.15 * 2));
+    unsigned min_memory_buffer = std::max(
+        static_cast<unsigned>(3 * avg_memory_per_task_of_cpu_type[cpu_type]),
+        static_cast<unsigned>(total_cpu_machines * 0.1 * avg_memory_per_task_of_cpu_type[cpu_type])
+    );
+    unsigned target_standby = std::max(2u, static_cast<unsigned>(total_cpu_machines * num_standby_machines_init));
+
+    // if we don't have enough resources, standby --> on
+    if (num_cores_available <= min_cores_buffer || memory_available <= min_memory_buffer) {
         for (const auto& [machine_id, m_state] : machine_states) {
             if (m_state.state == STANDBY && cpu_type == Machine_GetCPUType(machine_id)) {
                 Machine_SetState(machine_id, S0);
@@ -437,19 +455,8 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
             }
         }
 
-        // Check if we need to turn a machine from off to standby
-        double standby_ratio = 0;
-        unsigned total_machines_of_cpu_type = 0;
-        for (const auto& [machine_id, m_state] : machine_states) {
-            if (cpu_type == Machine_GetCPUType(machine_id)) {
-                total_machines_of_cpu_type++;
-                if (m_state.state == STANDBY || m_state.state == TURNING_STANDBY) standby_ratio++;
-            }
-        }
-
-        standby_ratio = standby_ratio / total_machines_of_cpu_type;
-        if (standby_ratio < (num_standby_machines_init)) {
-            // We need to turn on a machine from off if there are remaining off machines
+        // if we don't have enough standby machines, off --> standby
+        if (current_standby < target_standby) {
             for (const auto& [machine_id, m_state] : machine_states) {
                 if (m_state.state == OFF && cpu_type == Machine_GetCPUType(machine_id)) {
                     Machine_SetState(machine_id, STANDBY_STATE);
@@ -460,10 +467,8 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
         }
     }    
 
-    // Get the task parameters
-    // Get the task parameters
-    TaskInfo_t task = GetTaskInfo (task_id);
 
+    TaskInfo_t task = GetTaskInfo (task_id);
     vector<MachineScore> scored_machines;
     
     // score all machines
@@ -565,7 +570,7 @@ double MachineUtilization (MachineId_t machine_id) {
 void Scheduler::TaskComplete(Time_t now, TaskId_t task_id) {
     VMId_t vm_id = task_assignments[task_id];
     VMInfo_t vm_info = VM_GetInfo(vm_id);
-    // SimOutput("Scheduler::TaskComplete(): Task " + to_string(task_id) + " is complete at " + to_string(now) + " on vm " + to_string(vm_id), 1);
+
     if (VM_GetInfo(vm_id).active_tasks.size() != 0) {
         ThrowException("Somehow there are active tasks on a VM?????");
     }
@@ -580,7 +585,6 @@ void Scheduler::TaskComplete(Time_t now, TaskId_t task_id) {
     machine_states[orig_m_id].vms.erase(vm_id);
     if (!ongoing_migrations.count(vm_id)) {
         VM_Shutdown(vm_id);
-        // SimOutput("Shutdown(): vm " + to_string(vm_id), 1);
     }
     
     // sort machines by utilization in ascending order
@@ -629,40 +633,27 @@ void Scheduler::TaskComplete(Time_t now, TaskId_t task_id) {
             }
 
         }
-        // If machine is empty after migrations, shut it down
-        // MachineInfo_t m_info = Machine_GetInfo(source_id);
-        // if (all_vms_migrated && m_info.active_vms == 0 && 
-        //     total_on_machines > int(MIN_MACHINE_PERCENT_IN_STATE * total_machines) && !Machine_IsMigrationTarget(source_id)) {
-            
-        //     Machine_SetState(source_id, SLEEP_STATE);
-        //     machine_states[source_id].state = TURNING_OFF;
-        //     total_on_machines--;
-        //     // SimOutput("TaskComplete(): Machine " + to_string(source_id) + 
-        //     //          " is empty after migrations and is being turned off", 1);
-        // }
     }
 
+    // group machines by CPU type
     map<CPUType_t, vector<MachineId_t>> machines_by_cpu;
-    
-    // First, group all machines by CPU type
     for (const auto& [machine_id, m_state] : machine_states) {
         CPUType_t cpu_type = Machine_GetCPUType(machine_id);
         machines_by_cpu[cpu_type].push_back(machine_id);
     }
 
-    // Process each CPU type separately
+    // adjust power states of machines per CPU type
     for (const auto& [cpu_type, machines] : machines_by_cpu) {
-        // Count current state distribution and resources
-        unsigned total_cpu_machines = 0;
+        unsigned total_cpu_machines = machines.size();
         unsigned current_on = 0;
         unsigned current_standby = 0;
         unsigned total_available_cores = 0;
         unsigned total_available_memory = 0;
-        
+
+        // current state of machines for this cpu type
         for (const auto& machine_id : machines) {
             const auto& m_state = machine_states[machine_id];
             MachineInfo_t m_info = Machine_GetInfo(machine_id);
-            total_cpu_machines++;
             
             if (m_state.state == ON || m_state.state == TURNING_ON) {
                 current_on++;
@@ -675,59 +666,59 @@ void Scheduler::TaskComplete(Time_t now, TaskId_t task_id) {
             }
         }
 
-        unsigned target_standby = total_cpu_machines * num_standby_machines_init;
-        
-        // SimOutput("TaskComplete(): CPU Type " + to_string(cpu_type) + 
-        //          " - Available cores: " + to_string(total_available_cores) + 
-        //          ", Available memory: " + to_string(total_available_memory), 1);
+        // calculating dynamic buffers, derived using Claude 3.5 Sonnet
+        unsigned min_cores_buffer = std::max(4u, static_cast<unsigned>(total_cpu_machines * 0.15 * 2));  // At least 4 cores or 15% of total possible cores
+        double memory_buffer_factor = std::max(2.0, std::log2(static_cast<double>(total_cpu_machines)));
+        unsigned min_on_machines = std::max(3u, static_cast<unsigned>(total_cpu_machines * 0.2));  // At least 20% machines ON
 
-        if (total_available_cores >= 6 && 
-            total_available_memory > (3 * avg_memory_per_task_of_cpu_type[cpu_type])) {
-            
+        // if we have enough resources, on --> standby
+        if (total_available_cores >= min_cores_buffer && 
+            total_available_memory >= (memory_buffer_factor * avg_memory_per_task_of_cpu_type[cpu_type])) {
             for (const auto& machine_id : machines) {
                 auto& m_state = machine_states[machine_id];
-                if (m_state.state == ON && 
-                    !Machine_IsMigrationTarget(machine_id) &&
-                    Machine_GetInfo(machine_id).active_vms == 0) {
+                MachineInfo_t m_info = Machine_GetInfo(machine_id);
+
+                if (m_state.state == ON && m_info.active_vms == 0 && 
+                    !Machine_IsMigrationTarget(machine_id)) {
                     
-                    // Calculate resources without this machine
-                    unsigned cores_without = total_available_cores - 
-                        (Machine_GetInfo(machine_id).num_cpus - Machine_GetInfo(machine_id).active_vms);
-                    unsigned memory_without = total_available_memory - 
-                        (Machine_GetInfo(machine_id).memory_size - Machine_GetInfo(machine_id).memory_used);
+                    // calculate resources without this machine
+                    unsigned cores_without = total_available_cores - m_info.num_cpus;
+                    unsigned memory_without = total_available_memory - m_info.memory_size;
                     
-                    // Only transition if we maintain minimum resources
-                    if (cores_without >= 6 && 
-                        memory_without > (3 *avg_memory_per_task_of_cpu_type[cpu_type])) {
+                    if (cores_without >= min_cores_buffer && 
+                        memory_without >= (memory_buffer_factor * avg_memory_per_task_of_cpu_type[cpu_type]) &&
+                        current_on >= min_on_machines) {
                         
                         Machine_SetState(machine_id, STANDBY_STATE);
                         m_state.state = TURNING_STANDBY;
-                        current_on--;
-                        current_standby++;
-                        
-                        SimOutput("TaskComplete(): Transitioning ON machine " + 
-                                to_string(machine_id) + " to STANDBY", 1);
-                        break;  // Only transition one machine at a time
+                        break;
                     }
                 }
             }
         }
 
-        // Check if we have too many STANDBY machines
+        // if we have too many standby machines, standby --> off
+        unsigned target_standby = total_cpu_machines * num_standby_machines_init;
         if (current_standby > target_standby) {
+            
+            // calculate standby buffer based on cluster size, derived using Claude 3.5 Sonnet
+            unsigned standby_buffer = std::max(3u, static_cast<unsigned>(total_cpu_machines * 0.1));
+
+            if (current_standby > (target_standby + standby_buffer) && 
+                total_available_cores >= min_cores_buffer && 
+                total_available_memory >= (memory_buffer_factor * avg_memory_per_task_of_cpu_type[cpu_type]) &&
+                current_on >= min_on_machines) {
+            
+            // find standby machine to turn off
             for (const auto& machine_id : machines) {
                 auto& m_state = machine_states[machine_id];
                 if (m_state.state == STANDBY && 
                     !Machine_IsMigrationTarget(machine_id)) {
-                    
+                        
                     Machine_SetState(machine_id, S5);
                     m_state.state = TURNING_OFF;
-                    current_standby--;
-                    
-                    SimOutput("TaskComplete(): Transitioning excess STANDBY machine " + 
-                            to_string(machine_id) + " to OFF", 1);
-                    
-                    if (current_standby <= target_standby) break;
+                        break;
+                    }
                 }
             }
         }
