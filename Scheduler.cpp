@@ -62,8 +62,8 @@ struct EnergyState {
 };
 
 map<MachineId_t, EnergyState> machine_energy_rates;
-const double UNDERUTIL_THRESHOLD = 2.0;
-const double OVERUTIL_THRESHOLD = 8.0;
+double UNDERUTIL_THRESHOLD = 0.02;
+double OVERUTIL_THRESHOLD = 100.0;
 
 
 // Func headers
@@ -72,8 +72,9 @@ void MigrateHelper(VMId_t vm_id, MachineId_t start_m, MachineId_t end_m);
 void Debug();
 void DebugVM(VMId_t vm_id);
 /*
-
-
+Implementation from https://www.sciencedirect.com/science/article/pii/S0167739X11000689
+"Energy-aware resource allocation heuristics for efficient management of data centers for Cloud computing"
+---------
 NewTask - 4.1 VM Placement
 
 - Each Task going on its own VM? Seems to be the case
@@ -111,20 +112,24 @@ double MachineUtilization (MachineId_t machine_id) {
     double utilization_score = ((W_CORE * core_utilization) + (W_MEM * memory_utilization)) / 2.0;
 
     // Normalize the score to a range of 0 to 1
-    return std::clamp(utilization_score, 0.0, 10.0);
+    return utilization_score;
 }
 
+/* Implements the migration policy of the paper with under/overutilized thresholds 
+    - We had to settle for a priority-based policy for overutilized machines because we don't have a 
+    common way to calculate the machine and VM utilization together like the paper does.
+*/
 void LoadBalance() {
     for (auto& [machine_id, m_state] : machine_states) {
         if (m_state.state != ON) continue;
 
         MachineInfo_t m_info = Machine_GetInfo (machine_id);
         double machine_util = MachineUtilization (machine_id);
+
         // Under
         if (machine_util < UNDERUTIL_THRESHOLD) {
             // We need to migrate all VMs off this machine
             assert(m_state.vms.size() == m_info.active_vms);
-            // printf("Migrating %d VMs\n", m_state.vms.size());
 
             set<VMId_t> need_to_migrate = m_state.vms;
             for (const auto& vm_id : need_to_migrate) {
@@ -143,12 +148,6 @@ void LoadBalance() {
                 MigrateHelper(vm_id, machine_id, dest_machine); 
             }
             m_info = Machine_GetInfo(machine_id); 
-            // if (m_state.vms.size() != m_info.active_vms) {
-            //     // printf("%d\n", Now());
-            //     Debug();
-            //     printf("VM size: %d vs active_vms: %d\n", m_state.vms.size(), m_info.active_vms);
-            // }
-            // assert(m_state.vms.size() == m_info.active_vms);
             
 
             // See if we can turn this machine off
@@ -192,7 +191,6 @@ void LoadBalance() {
         }
     }
 }
-
 
 void DebugVM(VMId_t vm_id) {
     VMInfo_t vm_info = VM_GetInfo(vm_id);
@@ -453,7 +451,7 @@ void Scheduler::PeriodicCheck(Time_t now) {
         e_state.prev_energy_consumption = cur_consumption;
         e_state.prev_time = now;
     }  
-    
+
     // Check for under and over utilized machines
     LoadBalance();
     
