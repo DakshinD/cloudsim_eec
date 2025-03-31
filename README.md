@@ -47,7 +47,7 @@ Each algorithm is implemented in its respective Scheduler.cpp file. To run an in
 To run the test suite, use the provided Python test file. Execute the following command:
 
 ```bash
-python run_tests.py
+python3 run_tests.py
 ```
 
 You will then be prompted to choose what testcase set you want to run:
