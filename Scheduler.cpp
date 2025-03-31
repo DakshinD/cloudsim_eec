@@ -63,8 +63,7 @@ struct EnergyState {
 };
 
 map<MachineId_t, EnergyState> machine_energy_rates;
-double UNDERUTIL_THRESHOLD = 0.1;
-double OVERUTIL_THRESHOLD = 100.0;
+double OVERUTIL_THRESHOLD = 20.0;
 
 
 // Func headers
@@ -73,7 +72,7 @@ void MigrateHelper(VMId_t vm_id, MachineId_t start_m, MachineId_t end_m);
 void Debug();
 void DebugVM(VMId_t vm_id);
 /*
-Implementation from https://www.sciencedirect.com/science/article/pii/S0167739X11000689
+Take inspiration from https://www.sciencedirect.com/science/article/pii/S0167739X11000689
 "Energy-aware resource allocation heuristics for efficient management of data centers for Cloud computing"
 ---------
 NewTask - 4.1 VM Placement
@@ -82,15 +81,15 @@ NewTask - 4.1 VM Placement
 - Calculate current rate of energy consumption for each machine
     a. Keep DS that stores for each machine, prev energy consumption, prev rate, and prev time
     b. In PeriodicCheck, calculate the new rate and update prev energy and prev rate
+    c. We should also balance this by number of tasks on machine to spread them out
 
     
 
 Migration Policy (Also done in PeriodicCheck)
-- We set a lower and upper threshold for under/overutilized machines
+- We set anupper threshold for under/overutilized machines
 - We need a method to calculate utilization (cores, tasks, VMs, memory)
-1. Underutilized
-- Migrate all VMs off
-2. Overutilized
+
+1. Overutilized
 - while the current machine is above the threshold
     a. migrate off the VM with lowest priority task
     b. in future, combine remaining instructions, duration left, and priority to find optimal machine to migrate 
@@ -116,7 +115,7 @@ double MachineUtilization (MachineId_t machine_id) {
     return utilization_score;
 }
 
-/* Implements the migration policy of the paper with under/overutilized thresholds 
+/* Implements the migration policy of the paper with overutilized threshold 
     - We had to settle for a priority-based policy for overutilized machines because we don't have a 
     common way to calculate the machine and VM utilization together like the paper does.
 */
@@ -127,44 +126,9 @@ void LoadBalance() {
         MachineInfo_t m_info = Machine_GetInfo (machine_id);
         double machine_util = MachineUtilization (machine_id);
 
-        // Under
-        if (machine_util < UNDERUTIL_THRESHOLD) {
-            // SimOutput("I am UNDER\n", 0);
-            // We need to migrate all VMs off this machine
-            assert(m_state.vms.size() == m_info.active_vms);
-
-            set<VMId_t> need_to_migrate = m_state.vms;
-            for (const auto& vm_id : need_to_migrate) {
-                // Get best machine
-                MachineId_t dest_machine = GetBestMachine(VM_GetInfo(vm_id).active_tasks[0]); // Can only do this because there is 1 task per VM
-                if (dest_machine == machine_id) {
-                    // ThrowException("Migrating to same machine");
-                    continue; // NEED TO FIX
-                }
-
-                // If we couldn't find an ON machine to migrate to, just give up
-                if (machine_states[dest_machine].state != ON) {
-                    break;
-                }
-
-                MigrateHelper(vm_id, machine_id, dest_machine); 
-            }
-            m_info = Machine_GetInfo(machine_id); 
-            
-
-            // See if we can turn this machine off
-            if (m_info.active_vms == 0 && total_on_machines > int(total_machines * 0.5)) { // Keep at least 2 machines of each CPU type on
-                Machine_SetState (machine_id, SLEEP_STATE);
-                m_state.state = TURNING_OFF;
-                total_on_machines--;
-                on_cpu_count[Machine_GetCPUType(machine_id)]--;
-            }
-        }
-        
         // Over
         if (machine_util > OVERUTIL_THRESHOLD) {
-            
-            // SimOutput("I am OVER\n", 0);
+
             vector<pair<VMId_t, Priority_t>> vm_priorities;
 
             // calculate utilizations for all VMs on machine
@@ -176,10 +140,10 @@ void LoadBalance() {
             }
 
             sort(vm_priorities.begin(), vm_priorities.end(), [](const auto& a, const auto& b) {
-                return a.second < b.second;
+                return a.second > b.second;
             });
 
-            // Migrate VMs with lowest utilization first
+            // Migrate VMs with lowest priority first
             for (auto& [vm_id, vm_util] : vm_priorities) {
                 VMInfo_t vm_info = VM_GetInfo(vm_id);
                 TaskId_t task_id = vm_info.active_tasks[0];
@@ -509,7 +473,8 @@ void Scheduler::PeriodicCheck(Time_t now) {
     // Calculate energy rates of all machines
     for (auto& [machine_id, e_state] : machine_energy_rates) {
         uint64_t cur_consumption = Machine_GetEnergy(machine_id);
-        e_state.energy_consumption_rate = Machine_GetInfo(machine_id).active_tasks/10 * (cur_consumption - e_state.prev_energy_consumption)/((now - e_state.prev_time));
+        MachineInfo_t m_info = Machine_GetInfo(machine_id);
+        e_state.energy_consumption_rate = Machine_GetInfo(machine_id).active_tasks/10 * (cur_consumption - e_state.prev_energy_consumption)/((now - e_state.prev_time)); 
         e_state.prev_energy_consumption = cur_consumption;
         e_state.prev_time = now;
     }  
@@ -519,8 +484,8 @@ void Scheduler::PeriodicCheck(Time_t now) {
         SetMachinePState(machine_id);
     }
 
-    // Check for under and over utilized machines
-    // LoadBalance();
+    // Check for over utilized machines
+    LoadBalance();
     
 }
 
