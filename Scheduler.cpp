@@ -32,6 +32,7 @@ const MachineState_t SLEEP_STATE = S0i1;
 const bool PROGRESS_BAR = true;
 const bool MACHINE_STATE = false;
 const bool TEST = false;
+const bool ENERGY_BAR = false;
 
 // Progress Bar?? Only seen if -v 0
 unsigned total_tasks = 0;
@@ -62,7 +63,7 @@ struct EnergyState {
 };
 
 map<MachineId_t, EnergyState> machine_energy_rates;
-double UNDERUTIL_THRESHOLD = 0.02;
+double UNDERUTIL_THRESHOLD = 0.1;
 double OVERUTIL_THRESHOLD = 100.0;
 
 
@@ -128,6 +129,7 @@ void LoadBalance() {
 
         // Under
         if (machine_util < UNDERUTIL_THRESHOLD) {
+            // SimOutput("I am UNDER\n", 0);
             // We need to migrate all VMs off this machine
             assert(m_state.vms.size() == m_info.active_vms);
 
@@ -151,7 +153,7 @@ void LoadBalance() {
             
 
             // See if we can turn this machine off
-            if (m_info.active_vms == 0 && on_cpu_count[m_info.cpu] > 2) { // Keep at least 2 machines of each CPU type on
+            if (m_info.active_vms == 0 && total_on_machines > int(total_machines * 0.5)) { // Keep at least 2 machines of each CPU type on
                 Machine_SetState (machine_id, SLEEP_STATE);
                 m_state.state = TURNING_OFF;
                 total_on_machines--;
@@ -161,6 +163,8 @@ void LoadBalance() {
         
         // Over
         if (machine_util > OVERUTIL_THRESHOLD) {
+            
+            // SimOutput("I am OVER\n", 0);
             vector<pair<VMId_t, Priority_t>> vm_priorities;
 
             // calculate utilizations for all VMs on machine
@@ -259,6 +263,38 @@ void Debug() {
     SimOutput(res, 0);
 }
 
+void DebugMachineEnergy() {
+    string res = "MACHINE ENERGY AND TASK BREAKDOWN:\n";
+    res += "----------------------------------\n";
+    
+    for (const auto& [machine_id, m_state] : machine_states) {
+        MachineInfo_t machine_info = Machine_GetInfo(machine_id);
+        
+        // Skip empty idle machines
+        if (machine_info.active_tasks == 0 && 
+            machine_info.active_vms == 0 && 
+            pending_attachments[machine_id].size() == 0) {
+            continue;
+        }
+        
+        // Format energy rate with color based on consumption
+        double energy_rate = machine_info.energy_consumed - machine_energy_rates[machine_id].prev_energy_consumption;
+        string energy_color = energy_rate > 10.0 ? "\033[1;31m" :  // Red for high
+                             energy_rate > 5.0 ? "\033[1;33m" :     // Yellow for medium
+                             "\033[1;32m";                          // Green for low
+        
+        res += "Machine " + to_string(machine_id) + 
+               " [\033[1;36mTasks: " + to_string(machine_info.active_tasks) + 
+               "\033[0m, Energy Rate: " + energy_color + 
+               to_string(energy_rate) + " KW/h\033[0m, State: \033[1;35m" +
+               (m_state.state == ON ? "ON" : 
+                m_state.state == TURNING_ON ? "TURNING_ON" : 
+                m_state.state == TURNING_OFF ? "TURNING_OFF" : "OFF") +
+               "\033[0m]\n";
+    }
+    
+    SimOutput(res, 0);
+}
 
 /*
     Add task to an on or off machine
@@ -369,6 +405,28 @@ MachineId_t GetBestMachine(TaskId_t task_id) {
 }
 
 /*
+    Sets the machine P-state by determining load on it (whether that encompasses number of cores filled, memory, number of total tasks, etc.)
+*/
+void SetMachinePState(MachineId_t machine_id) {
+    MachineInfo_t machine_info = Machine_GetInfo(machine_id);
+    if (machine_info.s_state != S0) return;
+
+    // calculate load factors
+    double utilization = MachineUtilization(machine_id);
+
+    if (utilization <= 1.0) {
+        Machine_SetCorePerformance(machine_id, -1, P3); // Lowest performance state
+    } else if (utilization <= 10.0) {
+        Machine_SetCorePerformance(machine_id, -1, P2); // Low performance state
+    } else if (utilization <= 20.0) {
+        Machine_SetCorePerformance(machine_id, -1, P1); // Medium performance state
+    } else {
+        Machine_SetCorePerformance(machine_id, -1, P0); // Highest performance state
+    }
+    SimOutput("SetMachinePState(): Machine " + to_string(machine_id) + " set to P-state " + to_string(Machine_GetInfo(machine_id).p_state), 1);
+}
+
+/*
 - For NewTask, 
     1. sort the machines in ascending energy consumption rates
     2. check if machine has enough resources/compatible
@@ -444,16 +502,25 @@ void Scheduler::PeriodicCheck(Time_t now) {
     if (MACHINE_STATE) {
         DisplayMachineStates();
     }
+    if (ENERGY_BAR) {
+        DebugMachineEnergy();
+    }
+    
     // Calculate energy rates of all machines
     for (auto& [machine_id, e_state] : machine_energy_rates) {
         uint64_t cur_consumption = Machine_GetEnergy(machine_id);
-        e_state.energy_consumption_rate = (cur_consumption - e_state.prev_energy_consumption)/(now - e_state.prev_time);
+        e_state.energy_consumption_rate = Machine_GetInfo(machine_id).active_tasks/10 * (cur_consumption - e_state.prev_energy_consumption)/((now - e_state.prev_time));
         e_state.prev_energy_consumption = cur_consumption;
         e_state.prev_time = now;
     }  
 
+    // Loop over all machines and set their P-state based on utilization
+    for (const auto& machine_id : machines) {
+        SetMachinePState(machine_id);
+    }
+
     // Check for under and over utilized machines
-    LoadBalance();
+    // LoadBalance();
     
 }
 
