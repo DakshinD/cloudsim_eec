@@ -1,7 +1,7 @@
 # CloudSim EEC
 By Dakshin Devanand & Krish Shah
 
-This repository contains implementations of various algorithms for cloud simulation, including `greedy`, `e-eco`, `mbfd`, and `experimental`. Below are instructions on how to run individual files and the test suite.
+This repository contains implementations of various algorithms for cloud simulation, including `greedy`, `e-eco`, `dvfs`, and `experimental`. Below are instructions on how to run individual files and the test suite.
 
 ---
 
@@ -10,9 +10,9 @@ This repository contains implementations of various algorithms for cloud simulat
 This repository contains the following branches, each corresponding to a specific algorithm or experimental setup:
 
 - **`greedy`**: Contains the implementation of the Greedy algorithm.
-- **`e-eco`**: Contains the implementation of the E-ECO algorithm.
-- **`mbfd`**: Contains the implementation of the MBFD algorithm (research paper).
-- **`experimental`**: Contains experimental algorithm for efficiency.
+- **`e-eco`**: Contains the implementation of the E-ECO algorithm (this is our algo from literature, referenced slides and [paper](https://www.researchgate.net/publication/310451800_E-eco_Performance-Aware_Energy-Efficient_Cloud_Data_Center_Orchestration)).
+- **`dvfs`**: Contains an implementation that combines dvfs P-state manipulation with placement/migration policies from the MBFD algorithm ([research paper](https://www.sciencedirect.com/science/article/pii/S0167739X11000689)).
+- **`experimental`**: Contains experimental implementations for efficiency (**best** algo of ours).
 
 To switch to a specific branch, use:
 ```bash
@@ -31,7 +31,7 @@ git checkout greedy
 
 ## Running Individual Testcases
 
-Each algorithm is implemented in its respective Scheduler.cpp file. To run an individual algorithm, checkout to the specific branch: `greedy`, `e-eco`, `mbfd`, and `experimental`.
+Each algorithm is implemented in its respective Scheduler.cpp file. To run an individual algorithm, checkout to the specific branch: `greedy`, `e-eco`, `dvfs`, and `experimental`.
 
 ```bash
 ./simulator <filepath>.md
